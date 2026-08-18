@@ -67,6 +67,12 @@ export const audits = sqliteTable("audits", {
   trustScore: integer("trust_score").notNull(),
   pagesAudited: integer("pages_audited").notNull().default(1),
   responseStatus: integer("response_status"),
+  confidenceScore: integer("confidence_score").notNull().default(0),
+  checksPassed: integer("checks_passed").notNull().default(0),
+  checksFailed: integer("checks_failed").notNull().default(0),
+  checksUnverified: integer("checks_unverified").notNull().default(0),
+  checkSummary: text("check_summary").notNull().default("[]"),
+  lighthouseSummary: text("lighthouse_summary").notNull().default("null"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

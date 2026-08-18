@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { parseLeadCsv } from "@/lib/csv-leads";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
-import type { Finding, Lead, Opportunity, Proposal } from "@/lib/types";
+import type { AuditSummary, Finding, Lead, Opportunity, Proposal } from "@/lib/types";
 import ProspectDetail from "./prospect-detail";
 
 function initials(name: string) { return name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
@@ -22,6 +22,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [pagesAudited, setPagesAudited] = useState(0);
+  const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [dataMode, setDataMode] = useState<"loading" | "live" | "error">("loading");
@@ -70,9 +71,9 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
   async function loadDetail(id: number) {
     const response = await fetch(`/api/leads/${id}`); const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Unable to load audit");
-    setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.audit?.pagesAudited ?? 0); setProposal(payload.proposal ?? null);
+    setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.audit?.pagesAudited ?? 0); setAuditSummary(payload.audit ?? null); setProposal(payload.proposal ?? null);
   }
-  function chooseLead(lead: Lead) { setSelectedId(lead.id); setFindings([]); setOpportunity(null); setPagesAudited(0); setProposal(null); }
+  function chooseLead(lead: Lead) { setSelectedId(lead.id); setFindings([]); setOpportunity(null); setPagesAudited(0); setAuditSummary(null); setProposal(null); }
   useEffect(() => { if (selectedId > 0) loadDetail(selectedId).catch(() => { setFindings([]); setOpportunity(null); setProposal(null); }); }, [selectedId]);
 
   async function patchLead(values: Record<string, unknown>, success: string) {
@@ -94,7 +95,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
       const response = await fetch("/api/audit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: selected.id, website: selected.website }) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Audit failed");
-      replaceLead(payload.lead); setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.pagesAudited ?? 1); setToast(`${payload.pagesAudited}-page website audit complete`);
+      replaceLead(payload.lead); setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.pagesAudited ?? 1); setAuditSummary(payload.audit ?? null); setToast(`${payload.pagesAudited}-page evidence audit complete · score ${payload.lead.score}`);
     } catch (error) { setToast(error instanceof Error ? error.message : "Audit could not be completed"); }
     finally { setBusy(false); }
   }
@@ -138,7 +139,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
       </div>
     </section>
     {selected && <button className="detail-backdrop" aria-label="Close business audit" onClick={() => setSelectedId(-1)} />}
-    {selected && <ProspectDetail lead={selected} findings={findings} opportunity={opportunity} proposal={proposal} pagesAudited={pagesAudited} busy={busy} onClose={() => setSelectedId(-1)} onAudit={runAudit} onPatch={patchLead} onProposal={(created, updatedLead) => { setProposal(created); replaceLead(updatedLead); setToast("Proposal created"); }} onRefresh={async () => { await loadDetail(selected.id); setToast("Proposal refreshed"); }} />}
+    {selected && <ProspectDetail lead={selected} findings={findings} opportunity={opportunity} proposal={proposal} pagesAudited={pagesAudited} auditSummary={auditSummary} busy={busy} onClose={() => setSelectedId(-1)} onAudit={runAudit} onPatch={patchLead} onProposal={(created, updatedLead) => { setProposal(created); replaceLead(updatedLead); setToast("Proposal created"); }} onRefresh={async () => { await loadDetail(selected.id); setToast("Proposal refreshed"); }} />}
     {showAdd && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowAdd(false)}><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="add-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">New audit</p><h2 id="add-title">Add a business</h2></div><button onClick={() => setShowAdd(false)} aria-label="Close">×</button></div><form onSubmit={addLead}><div className="form-grid"><label className="span-two">Business name<input name="agencyName" required placeholder="Acme Home Services" /></label><label className="span-two">Website<input name="website" required inputMode="url" placeholder="https://business.com" /></label><label>Industry<input name="carrier" placeholder="HVAC, legal, retail…" /></label><label>City<input name="city" placeholder="Denver" /></label><label>State<input name="state" maxLength={3} placeholder="CO" /></label><label>Contact name <small>Optional</small><input name="contactName" placeholder="Alex Rivera" /></label><label className="span-two">Google Business Profile <small>Optional</small><input name="googleProfileUrl" inputMode="url" placeholder="https://g.page/..." /></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowAdd(false)}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Adding…" : "Add business"}</button></div></form></section></div>}
     {showImport && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowImport(false)}><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="import-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">Bulk audits</p><h2 id="import-title">Import businesses</h2></div><button onClick={() => setShowImport(false)} aria-label="Close">×</button></div><div className="import-body"><label className="file-drop">Choose a CSV file<input type="file" accept=".csv,text/csv" onChange={(event) => chooseCsv(event.target.files?.[0])} /><span>{importFile ? `${importFile} · ${importRows.length} rows ready` : "Business name and website are required."}</span></label><div className="modal-actions"><button className="secondary-button" onClick={() => setShowImport(false)}>Cancel</button><button className="primary-button" disabled={busy || !importRows.length} onClick={importCsv}>{busy ? "Importing…" : `Import ${importRows.length || ""} businesses`}</button></div></div></section></div>}
     {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}

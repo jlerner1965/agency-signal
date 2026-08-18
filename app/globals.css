@@ -472,6 +472,12 @@ td { height: 70px; font-size: 12px; }
   .copilot-heading > small { display: none; }
 }
 
+.report-audit-method { margin: 22px 0 28px; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #dfe6e2; border-radius: 9px; overflow: hidden; background: #f7faf8; }
+.report-audit-method article { padding: 17px; border-right: 1px solid #e1e7e4; }.report-audit-method article:nth-child(4) { border: 0; }
+.report-audit-method span, .report-audit-method strong { display: block; }.report-audit-method span { color: #75817b; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }.report-audit-method strong { margin-top: 7px; color: #1c5f47; font-size: 18px; }
+.report-audit-method > p { grid-column: 1 / -1; margin: 0; padding: 12px 17px; border-top: 1px solid #e1e7e4; color: #6b766f; font-size: 9px; }
+@media (max-width: 600px) { .report-audit-method { grid-template-columns: 1fr 1fr; }.report-audit-method article { border-bottom: 1px solid #e1e7e4; }.report-audit-method > p { grid-column: 1 / -1; } }
+
 /* Enhanced audit and proposal authoring */
 .audit-coverage { margin-top: 14px; padding: 0; }
 .audit-coverage span { padding: 6px 9px; font-size: 10px; }
@@ -556,3 +562,36 @@ td { height: 70px; font-size: 12px; }
   .presence-topbar { height: auto; min-height: 66px; padding: 10px 14px; flex-wrap: wrap; }.presence-topbar > label { order: 2; width: 100%; }.presence-topbar .sync-state, .presence-topbar .secondary-button { display: none; }.presence-intro { align-items: flex-start; }.presence-intro h1 { font-size: 33px; }.presence-intro > button { display: none; }.presence-metrics article { min-height: 100px; padding: 16px; }.presence-metrics strong { font-size: 26px; }.audit-detail-panel { width: 100vw; }.audit-detail-scroll { padding: 15px; }.audit-detail-tabs { padding: 0 15px; gap: 18px; }.presence-overall { grid-template-columns: 1fr; }.large-score { width: 115px; height: 115px; }.two-review-cards { grid-template-columns: 1fr; }.website-score-grid { grid-template-columns: 1fr 1fr; }.website-score-grid article:first-child { grid-column: 1 / -1; }.detailed-findings dl { grid-template-columns: 1fr; }.google-score-form { grid-template-columns: 1fr; }.google-score-form .span-two { grid-column: auto; }.summary-actions, .proposal-money { grid-template-columns: 1fr; }
 }
 .proposal-score-pair { display: flex; align-items: center; gap: 24px; }
+
+/* Evidence audit and blueprint workflow */
+.audit-evidence-summary { margin-top: 13px; padding: 18px 20px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 20px; border: 1px solid #d9e3df; border-radius: 9px; background: #f5faf7; }
+.audit-evidence-summary div { display: grid; gap: 4px; }
+.audit-evidence-summary span { color: #6c7a73; font-size: 8px; font-weight: 850; text-transform: uppercase; letter-spacing: .07em; }
+.audit-evidence-summary strong { font-size: 14px; }
+.audit-evidence-summary small { color: #6b7783; font-size: 9px; }
+.audit-evidence-summary > p { grid-column: 1 / -1; margin: 0; padding-top: 10px; border-top: 1px solid #dce7e1; color: #65736b; font-size: 9px; }
+.audit-methodology { margin-top: 10px; border: 1px solid #dfe5e9; border-radius: 8px; background: white; }
+.audit-methodology summary { padding: 14px 17px; color: #315f4e; font-size: 10px; font-weight: 800; cursor: pointer; }
+.audit-methodology > div { max-height: 340px; padding: 0 17px 12px; overflow-y: auto; }
+.audit-methodology article { padding: 10px 0; display: grid; grid-template-columns: 25px 1fr; gap: 10px; border-top: 1px solid #edf0f2; }
+.audit-methodology article strong, .audit-methodology article small { display: block; }
+.audit-methodology article strong { font-size: 10px; }
+.audit-methodology article small { margin-top: 3px; color: #778391; font-size: 8px; line-height: 1.45; }
+.check-status { width: 21px; height: 21px; display: grid; place-items: center; border-radius: 50%; font-size: 9px; font-weight: 900; }
+.check-status.passed { background: #e2f4ea; color: #157249; }.check-status.failed { background: #fee8e6; color: #a63d38; }.check-status.unverified { background: #edf0f2; color: #778391; }
+.blueprint-builder { display: grid; gap: 12px; }
+.blueprint-score { padding: 18px 22px; display: grid; grid-template-columns: 1fr 35px 1.4fr; align-items: center; border: 1px solid #d9e3df; border-radius: 9px; background: #f4faf6; }
+.blueprint-score > div { display: grid; gap: 4px; }.blueprint-score span { color: #6f7b75; font-size: 8px; font-weight: 850; text-transform: uppercase; letter-spacing: .07em; }.blueprint-score strong { color: #1b6248; font-size: 28px; }.blueprint-score small { color: #7a867f; font-size: 8px; }.blueprint-score > i { color: #83a493; font-style: normal; }
+.blueprint-recommendations, .blueprint-structure, .blueprint-roadmap { padding: 20px; border: 1px solid #dfe5e9; border-radius: 9px; background: white; }
+.blueprint-recommendations .section-title-row button { border: 0; background: transparent; color: #2b7257; font: inherit; font-size: 9px; font-weight: 800; cursor: pointer; }
+.blueprint-recommendations > label { padding: 14px 0; display: grid; grid-template-columns: 20px 52px 1fr; gap: 10px; align-items: start; border-top: 1px solid #edf0f2; cursor: pointer; }
+.blueprint-recommendations > label:first-of-type { margin-top: 14px; }.blueprint-recommendations input { margin-top: 4px; accent-color: #1f6e50; }.blueprint-recommendations strong { display: block; font-size: 11px; }.blueprint-recommendations p { margin: 5px 0; color: #657183; font-size: 9px; line-height: 1.5; }.blueprint-recommendations small { color: #84909d; font-size: 8px; }
+.blueprint-structure { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }.blueprint-structure ol { margin: 12px 0 0; padding-left: 17px; }.blueprint-structure li { padding: 4px 0; color: #536174; font-size: 9px; line-height: 1.5; }
+.blueprint-roadmap article { padding: 12px 0; display: grid; grid-template-columns: 55px 1fr; gap: 12px; border-top: 1px solid #edf0f2; }.blueprint-roadmap article:first-of-type { margin-top: 10px; }.blueprint-roadmap article > span { color: #2a7055; font-size: 9px; font-weight: 850; text-transform: uppercase; }.blueprint-roadmap strong { font-size: 10px; }.blueprint-roadmap p { margin: 4px 0 0; color: #75808f; font-size: 8px; line-height: 1.5; }
+
+@media (max-width: 600px) {
+  .audit-evidence-summary, .blueprint-structure { grid-template-columns: 1fr; }
+  .audit-evidence-summary > p { grid-column: auto; }
+  .blueprint-score { grid-template-columns: 1fr 20px 1.4fr; }
+  .audit-detail-tabs { gap: 12px; overflow-x: auto; }
+}

@@ -115,6 +115,12 @@ export async function POST(request: Request) {
       trustScore: result.trust,
       pagesAudited: result.pagesAudited,
       responseStatus: result.status,
+      confidenceScore: result.confidenceScore,
+      checksPassed: result.checksPassed,
+      checksFailed: result.checksFailed,
+      checksUnverified: result.checksUnverified,
+      checkSummary: JSON.stringify(result.checks),
+      lighthouseSummary: JSON.stringify(result.lighthouse),
     }).returning();
     if (result.findings.length) {
       await db.insert(auditFindings).values(result.findings.map((finding: Record<string, unknown>) => ({ ...finding, auditId: audit.id })) as typeof auditFindings.$inferInsert[]);

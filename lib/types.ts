@@ -77,6 +77,29 @@ export type Finding = {
   sortOrder: number;
 };
 
+export type AuditCheck = {
+  id: string;
+  category: "Visibility" | "Conversion" | "Technical" | "Trust";
+  label: string;
+  status: "passed" | "failed" | "unverified";
+  weight: number;
+  earned: number;
+  evidence: string;
+};
+
+export type AuditSummary = {
+  id: number;
+  score: number;
+  pagesAudited: number;
+  confidenceScore: number;
+  checksPassed: number;
+  checksFailed: number;
+  checksUnverified: number;
+  checkSummary: string;
+  lighthouseSummary: string;
+  createdAt: string;
+};
+
 export type Activity = {
   id: string;
   activityType: string;

@@ -24,7 +24,8 @@ export async function GET(
         })
         .where(eq(leads.id, report.lead.id)),
     ]);
-    const { lead, findings } = report;
+    const { lead, audit } = report;
+    const findings = audit && audit.confidenceScore > 0 ? report.findings : [];
     return Response.json({
       lead: {
         agencyName: lead.agencyName,
@@ -40,6 +41,14 @@ export async function GET(
         lastAuditAt: lead.lastAuditAt,
       },
       findings,
+      audit: audit && audit.confidenceScore > 0 ? {
+        pagesAudited: audit.pagesAudited,
+        confidenceScore: audit.confidenceScore,
+        checksPassed: audit.checksPassed,
+        checksFailed: audit.checksFailed,
+        checksUnverified: audit.checksUnverified,
+        createdAt: audit.createdAt,
+      } : null,
       opportunity: buildOpportunity(lead, findings),
     });
   } catch (error) {
