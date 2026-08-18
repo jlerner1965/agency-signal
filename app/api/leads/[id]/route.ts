@@ -1,7 +1,8 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, leads, reportEvents } from "@/db/schema";
+import { activities, auditFindings, audits, leads, reportEvents } from "@/db/schema";
 import { requireDashboardApi } from "@/app/dashboard-auth";
+import { buildOpportunity } from "@/lib/opportunity";
 
 const allowedStatuses = new Set([
   "New",
@@ -85,6 +86,12 @@ export async function GET(
   if (!Number.isInteger(id)) return Response.json({ error: "Invalid lead" }, { status: 400 });
   try {
     const db = await getDb();
+    const [lead] = await db.select().from(leads).where(eq(leads.id, id)).limit(1);
+    if (!lead) return Response.json({ error: "Lead not found" }, { status: 404 });
+    const [latestAudit] = await db.select().from(audits).where(eq(audits.leadId, id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
+    const findings = latestAudit
+      ? await db.select().from(auditFindings).where(eq(auditFindings.auditId, latestAudit.id)).orderBy(auditFindings.sortOrder)
+      : [];
     const activityRows = await db.select().from(activities).where(eq(activities.leadId, id)).orderBy(desc(activities.createdAt), desc(activities.id)).limit(30);
     const eventRows = await db.select().from(reportEvents).where(eq(reportEvents.leadId, id)).orderBy(desc(reportEvents.createdAt), desc(reportEvents.id)).limit(30);
     const reportActivity = eventRows.map((event) => ({
@@ -97,7 +104,7 @@ export async function GET(
       ...activityRows.map((row) => ({ ...row, id: `activity-${row.id}` })),
       ...reportActivity,
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 30);
-    return Response.json({ activities: combined });
+    return Response.json({ activities: combined, audit: latestAudit ?? null, findings, opportunity: buildOpportunity(lead, findings) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load activity";
     return Response.json({ error: message }, { status: 500 });

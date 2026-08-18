@@ -1,0 +1,1 @@
+ALTER TABLE `audits` ADD `pages_audited` integer DEFAULT 1 NOT NULL;

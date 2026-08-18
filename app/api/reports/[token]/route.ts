@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { leads, reportEvents } from "@/db/schema";
 import { getLeadByToken } from "@/lib/server-data";
+import { buildOpportunity } from "@/lib/opportunity";
 
 export async function GET(
   _request: Request,
@@ -39,6 +40,7 @@ export async function GET(
         lastAuditAt: lead.lastAuditAt,
       },
       findings,
+      opportunity: buildOpportunity(lead, findings),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load report";

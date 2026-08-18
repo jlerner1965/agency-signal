@@ -7,9 +7,11 @@ AgencySignal is an evidence-led audit-to-sale workspace for growing businesses. 
 - Persistent business lead pipeline
 - CSV import with common lead-source field mapping and duplicate detection
 - Add and manage prospect records
-- Live public-homepage audits
+- Live multi-page website audits covering up to five prioritized pages
 - Deterministic visibility, conversion, technical, and trust scoring
 - Evidence-backed findings with recommendations
+- Transparent opportunity scoring and recommended service matching
+- Personalized “best evidence” outreach angles and next-action guidance
 - Public prospect reports protected by opaque 128-bit links
 - Report-view tracking
 - Prospect review-request capture
@@ -75,7 +77,7 @@ worker/             Cloudflare Worker entry point
 
 ## Current MVP boundaries
 
-- Website auditing reviews publicly observable homepage evidence.
+- Website auditing reviews publicly observable evidence from the homepage and up to four prioritized internal pages.
 - Findings should be reviewed by a person before prospect outreach.
 - Outreach opens as a prefilled Gmail draft for human review and sending; direct API sending requires a separately configured Google OAuth integration.
 - Google Places and Business Profile integrations require separate credentials and are not configured in this repository.

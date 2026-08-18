@@ -53,6 +53,18 @@ export type Activity = {
   createdAt: string;
 };
 
+export type Opportunity = {
+  priorityScore: number;
+  priorityLabel: string;
+  primaryService: string;
+  recommendedOffer: string;
+  expectedOutcome: string;
+  scope: string;
+  primaryFinding: string;
+  outreachAngle: string;
+  nextAction: string;
+};
+
 export type PublicReportLead = Pick<
   Lead,
   | "agencyName"

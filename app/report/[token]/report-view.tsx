@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import type { Finding, PublicReportLead } from "@/lib/types";
+import type { Finding, Opportunity, PublicReportLead } from "@/lib/types";
 
-type ReportPayload = { lead: PublicReportLead; findings: Finding[] };
+type ReportPayload = { lead: PublicReportLead; findings: Finding[]; opportunity: Opportunity };
 
 export default function ReportView({ token }: { token: string }) {
   const [payload, setPayload] = useState<ReportPayload | null>(null);
@@ -60,7 +60,7 @@ export default function ReportView({ token }: { token: string }) {
     );
   }
 
-  const { lead, findings } = payload;
+  const { lead, findings, opportunity } = payload;
   const scoreLabel = lead.score < 55 ? "Needs attention" : lead.score < 70 ? "Opportunity identified" : "Solid foundation";
   return (
     <main className="report-shell">
@@ -77,6 +77,7 @@ export default function ReportView({ token }: { token: string }) {
           {[["Visibility", lead.visibilityScore], ["Conversion", lead.conversionScore], ["Technical", lead.technicalScore], ["Trust", lead.trustScore]].map(([label, value]) => <article key={label}><div><span>{label}</span><strong>{value}</strong></div><i><b style={{ width: `${value}%` }} /></i></article>)}
         </div>
       </section>
+      <section className="report-opportunity"><div className="report-container report-opportunity-grid"><div><p className="eyebrow">Recommended implementation path</p><h2>{opportunity.recommendedOffer}</h2><p>{opportunity.expectedOutcome}</p></div><div className="report-offer-card"><span>Primary opportunity</span><strong>{opportunity.primaryService}</strong><p>{opportunity.primaryFinding}</p><small>{opportunity.scope}</small></div></div></section>
       <section className="findings-section"><div className="report-container"><div className="report-section-heading compact"><p className="eyebrow">Priority findings</p><h2>What we found—and what to do next.</h2></div><div className="findings-list">{findings.slice(0, 5).map((finding, index) => <article className="finding-card" key={`${finding.title}-${index}`}><div className="finding-index">0{index + 1}</div><div className="finding-main"><div className="finding-tags"><span>{finding.category}</span><span className={`severity ${finding.severity.toLowerCase()}`}>{finding.severity} priority</span></div><h3>{finding.title}</h3><div className="finding-columns"><div><h4>Evidence</h4><p>{finding.evidence}</p></div><div><h4>Recommended change</h4><p>{finding.recommendation}</p></div><div><h4>Why it matters</h4><p>{finding.impact}</p></div></div><a href={finding.affectedUrl} target="_blank" rel="noreferrer">Audited page ↗</a></div></article>)}</div></div></section>
       <section className="report-cta"><div className="report-container report-cta-inner"><div><p className="eyebrow">Recommended next step</p><h2>Review the findings together in 15 minutes.</h2><p>I’ll explain which changes are worth prioritizing, what can be fixed quickly and where a larger redesign would actually be justified.</p></div>{requestState === "sent" ? <div className="request-success" role="status"><strong>Request received.</strong><span>James will follow up using the email you provided.</span></div> : <form className="review-form" onSubmit={requestReview}><label>Your name<input name="name" autoComplete="name" required /></label><label>Email<input name="email" type="email" autoComplete="email" required /></label><label className="span-two">What would you like to discuss?<textarea name="message" rows={3} placeholder="Optional" /></label>{requestError && <p className="form-error">{requestError}</p>}<button className="report-primary span-two" disabled={requestState === "sending"}>{requestState === "sending" ? "Sending…" : "Request a review"}</button></form>}</div></section>
       <footer className="report-footer"><div className="report-container"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><p>Evidence-led digital opportunity briefs for growing businesses.</p><span>Prepared by James Lerner</span></div></footer>

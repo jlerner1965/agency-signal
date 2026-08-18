@@ -38,6 +38,7 @@ export const audits = sqliteTable("audits", {
   conversionScore: integer("conversion_score").notNull(),
   technicalScore: integer("technical_score").notNull(),
   trustScore: integer("trust_score").notNull(),
+  pagesAudited: integer("pages_audited").notNull().default(1),
   responseStatus: integer("response_status"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
