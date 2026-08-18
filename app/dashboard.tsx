@@ -21,7 +21,7 @@ function friendlyDate(value: string | null) {
 }
 function NavIcon({ label }: { label: string }) { return <span className="nav-icon" aria-hidden="true">{label}</span>; }
 
-export default function Dashboard() {
+export default function Dashboard({ ownerName }: { ownerName: string }) {
   const [leads, setLeads] = useState<Lead[]>(sampleLeads);
   const [selectedId, setSelectedId] = useState(sampleLeads[0].id);
   const [section, setSection] = useState<Section>("Pipeline");
@@ -98,6 +98,10 @@ export default function Dashboard() {
     } catch (error) { setToast(error instanceof Error ? error.message : "Lead could not be added"); }
     finally { setBusy(false); }
   }
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/login");
+  }
 
   const meta = sectionMeta[section];
   return (
@@ -113,7 +117,7 @@ export default function Dashboard() {
         </nav>
         <div className="sidebar-divider" /><div className="nav-kicker">Workspace</div>
         <nav className="secondary-nav" aria-label="Workspace navigation"><button><NavIcon label="T" /> Templates</button><button><NavIcon label="S" /> Scoring model</button><button><NavIcon label="⚙" /> Settings</button></nav>
-        <div className="sidebar-bottom"><div className="coverage-card"><div className="coverage-head"><span>Weekly coverage</span><strong>68%</strong></div><div className="progress-track"><span style={{ width: "68%" }} /></div><p>17 of 25 target agencies audited</p></div><div className="user-row"><span className="avatar">JL</span><span><strong>James Lerner</strong><small>Workspace owner</small></span><button aria-label="Open user menu">•••</button></div></div>
+        <div className="sidebar-bottom"><div className="coverage-card"><div className="coverage-head"><span>Weekly coverage</span><strong>68%</strong></div><div className="progress-track"><span style={{ width: "68%" }} /></div><p>17 of 25 target agencies audited</p></div><div className="user-row"><span className="avatar">JL</span><span><strong>{ownerName}</strong><small>Workspace owner</small></span><button aria-label="Sign out" title="Sign out" onClick={signOut}>↗</button></div></div>
       </aside>
 
       <section className="workspace">

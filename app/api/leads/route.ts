@@ -2,17 +2,15 @@ import { desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { leads } from "@/db/schema";
 import { ensureSeedData } from "@/lib/server-data";
+import { requireDashboardApi } from "@/app/dashboard-auth";
 
-function makeToken(name: string) {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 45);
-  return `${base}-${crypto.randomUUID().slice(0, 6)}`;
+function makeToken() {
+  return crypto.randomUUID().replaceAll("-", "");
 }
 
 export async function GET() {
+  const denied = await requireDashboardApi();
+  if (denied) return denied;
   try {
     await ensureSeedData();
     const db = await getDb();
@@ -25,6 +23,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireDashboardApi();
+  if (denied) return denied;
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const agencyName = String(body.agencyName ?? "").trim();
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
         carrier: String(body.carrier ?? "Independent").trim() || "Independent",
         email: String(body.email ?? "").trim(),
         phone: String(body.phone ?? "").trim(),
-        reportToken: makeToken(agencyName),
+        reportToken: makeToken(),
       })
       .returning();
     return Response.json({ lead }, { status: 201 });

@@ -23,7 +23,23 @@ export async function GET(
         })
         .where(eq(leads.id, report.lead.id)),
     ]);
-    return Response.json(report);
+    const { lead, findings } = report;
+    return Response.json({
+      lead: {
+        agencyName: lead.agencyName,
+        contactName: lead.contactName,
+        city: lead.city,
+        state: lead.state,
+        website: lead.website,
+        score: lead.score,
+        visibilityScore: lead.visibilityScore,
+        conversionScore: lead.conversionScore,
+        technicalScore: lead.technicalScore,
+        trustScore: lead.trustScore,
+        lastAuditAt: lead.lastAuditAt,
+      },
+      findings,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load report";
     return Response.json({ error: message }, { status: 500 });

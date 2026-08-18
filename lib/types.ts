@@ -45,3 +45,18 @@ export type Finding = {
   affectedUrl: string;
   sortOrder: number;
 };
+
+export type PublicReportLead = Pick<
+  Lead,
+  | "agencyName"
+  | "contactName"
+  | "city"
+  | "state"
+  | "website"
+  | "score"
+  | "visibilityScore"
+  | "conversionScore"
+  | "technicalScore"
+  | "trustScore"
+  | "lastAuditAt"
+>;

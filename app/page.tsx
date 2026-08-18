@@ -1,5 +1,9 @@
 import Dashboard from "./dashboard";
+import { requireDashboardUser } from "./dashboard-auth";
 
-export default function Home() {
-  return <Dashboard />;
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  await requireDashboardUser("/");
+  return <Dashboard ownerName="James Lerner" />;
 }

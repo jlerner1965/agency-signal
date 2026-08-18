@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activities, leads } from "@/db/schema";
+import { requireDashboardApi } from "@/app/dashboard-auth";
 
 const allowedStatuses = new Set([
   "New",
@@ -17,6 +18,8 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const denied = await requireDashboardApi();
+  if (denied) return denied;
   try {
     const { id: rawId } = await context.params;
     const id = Number(rawId);

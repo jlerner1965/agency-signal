@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activities, auditFindings, audits, leads } from "@/db/schema";
 import type { Finding } from "@/lib/types";
+import { requireDashboardApi } from "@/app/dashboard-auth";
 
 function isPrivateHostname(hostname: string) {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -170,6 +171,8 @@ async function inspectWebsite(input: string) {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireDashboardApi();
+  if (denied) return denied;
   try {
     const body = (await request.json()) as { leadId?: number; website?: string };
     const leadId = Number(body.leadId);

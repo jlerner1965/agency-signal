@@ -9,8 +9,10 @@ AgencySignal is an evidence-led audit-to-sale workspace for local insurance agen
 - Live public-homepage audits
 - Deterministic visibility, conversion, technical, and trust scoring
 - Evidence-backed findings with recommendations
-- Shareable prospect report pages
+- Public prospect reports protected by opaque 128-bit links
 - Report-view tracking
+- Prospect review-request capture
+- Email/password protected dashboard and APIs with signed, time-limited sessions
 - Personalized outreach copy
 - Follow-up and pipeline-stage management
 - Responsive desktop and mobile interface
@@ -45,6 +47,12 @@ Create a production build:
 npm run build
 ```
 
+Configure `AGENCYSIGNAL_LOGIN_EMAIL`, `AGENCYSIGNAL_PASSWORD_SALT`,
+`AGENCYSIGNAL_PASSWORD_HASH`, and `AGENCYSIGNAL_SESSION_SECRET` in the hosted
+runtime. Keep every authentication value out of the repository. Passwords are
+verified with PBKDF2-SHA-256 at the runtime's maximum supported iteration count
+and are never stored in plaintext.
+
 Generate a new database migration after editing `db/schema.ts`:
 
 ```bash
@@ -67,7 +75,7 @@ worker/             Cloudflare Worker entry point
 
 - Website auditing reviews publicly observable homepage evidence.
 - Findings should be reviewed by a person before prospect outreach.
-- Outreach is copied for approval rather than automatically sent.
+- Outreach is copied for approval rather than automatically sent; report responses are stored directly on the lead.
 - Google Places and Business Profile integrations require separate credentials and are not configured in this repository.
 - Sample agencies use fictional contact details and demonstration websites.
 
