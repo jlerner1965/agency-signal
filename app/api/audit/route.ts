@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activities, auditFindings, audits, leads } from "@/db/schema";
 import { requireDashboardApi } from "@/app/dashboard-auth";
-import { analyzeWebsitePages, extractInternalLinks } from "@/lib/site-audit";
+import { analyzeWebsitePages, extractBusinessMetadata, extractInternalLinks, mergeLighthouseAudit } from "@/lib/site-audit";
 import { buildOpportunity } from "@/lib/opportunity";
 
 function isPrivateHostname(hostname: string) {
@@ -38,16 +38,55 @@ async function fetchPage(input: string, signal: AbortSignal) {
   return { url: finalUrl, html: (await response.text()).slice(0, 1_500_000), status: response.status };
 }
 
+function categoryScore(categories: Record<string, { score?: number }> | undefined, key: string) {
+  const score = categories?.[key]?.score;
+  return typeof score === "number" ? Math.round(score * 100) : null;
+}
+
+async function fetchLighthouseSnapshot(input: string, signal: AbortSignal) {
+  try {
+    const params = new URLSearchParams({ url: input, strategy: "mobile", locale: "en" });
+    for (const category of ["performance", "accessibility", "seo", "best-practices"]) params.append("category", category);
+    const apiKey = process.env.PAGESPEED_API_KEY;
+    if (apiKey) params.set("key", apiKey);
+    const response = await fetch(`https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed?${params}`, { signal });
+    if (!response.ok) return null;
+    const payload = await response.json() as {
+      lighthouseResult?: {
+        categories?: Record<string, { score?: number }>;
+        audits?: Record<string, { displayValue?: string }>;
+      };
+    };
+    const categories = payload.lighthouseResult?.categories;
+    const audits = payload.lighthouseResult?.audits;
+    if (!categories) return null;
+    return {
+      performance: categoryScore(categories, "performance"),
+      accessibility: categoryScore(categories, "accessibility"),
+      seo: categoryScore(categories, "seo"),
+      bestPractices: categoryScore(categories, "best-practices"),
+      lcp: audits?.["largest-contentful-paint"]?.displayValue ?? "",
+      inp: audits?.["interaction-to-next-paint"]?.displayValue ?? audits?.["total-blocking-time"]?.displayValue ?? "",
+      cls: audits?.["cumulative-layout-shift"]?.displayValue ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function inspectWebsite(input: string) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
     const home = await fetchPage(input, controller.signal);
+    const lighthousePromise = fetchLighthouseSnapshot(home.url, controller.signal);
     const links = extractInternalLinks(home.html, home.url, 4);
     const secondary = await Promise.allSettled(links.map((url: string) => fetchPage(url, controller.signal)));
     const pages = [home, ...secondary.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchPage>>> => result.status === "fulfilled").map((result) => result.value)];
-    const analysis = analyzeWebsitePages(pages);
-    return { ...analysis, finalUrl: home.url, status: home.status };
+    const contentAnalysis = analyzeWebsitePages(pages);
+    const lighthouse = await lighthousePromise;
+    const analysis = mergeLighthouseAudit(contentAnalysis, lighthouse, home.url);
+    return { ...analysis, metadata: extractBusinessMetadata(home.html, home.url), finalUrl: home.url, status: home.status };
   } finally {
     clearTimeout(timeout);
   }
@@ -97,7 +136,7 @@ export async function POST(request: Request) {
       activityType: "audit_completed",
       description: `${result.pagesAudited}-page website audit completed · ${opportunity.primaryService} opportunity · score ${result.score}`,
     });
-    return Response.json({ lead, audit, findings: result.findings, pagesAudited: result.pagesAudited, opportunity });
+    return Response.json({ lead, audit, findings: result.findings, pagesAudited: result.pagesAudited, opportunity, lighthouse: result.lighthouse, metadata: result.metadata });
   } catch (error) {
     const message = error instanceof Error && error.name === "AbortError"
       ? "The website took too long to complete a multi-page review."

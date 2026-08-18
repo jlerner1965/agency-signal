@@ -6,6 +6,10 @@ import { buildOpportunity } from "@/lib/opportunity";
 import { offerCatalog, offerForOpportunity } from "@/lib/sales";
 
 function makeToken() { return crypto.randomUUID().replaceAll("-", ""); }
+function cleanText(value: unknown, fallback: string, maximum: number) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return (text || fallback).slice(0, maximum);
+}
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const denied = await requireDashboardApi();
@@ -14,7 +18,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const { id: rawId } = await context.params;
     const leadId = Number(rawId);
     if (!Number.isInteger(leadId)) return Response.json({ error: "Invalid lead" }, { status: 400 });
-    const body = (await request.json()) as { offerId?: string; price?: number; timeline?: string };
+    const body = (await request.json()) as { offerId?: string; price?: number; timeline?: string; title?: string; outcome?: string; scope?: string; deliverables?: string[] };
     const db = await getDb();
     const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
     if (!lead) return Response.json({ error: "Lead not found" }, { status: 404 });
@@ -23,23 +27,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const opportunity = buildOpportunity(lead, findings);
     const offer = offerCatalog.find((item) => item.id === body.offerId) ?? offerForOpportunity(opportunity);
     const price = Math.max(500, Math.min(250000, Math.round(Number(body.price) || offer.price)));
+    const title = cleanText(body.title, offer.name, 160);
+    const outcome = cleanText(body.outcome, offer.outcome, 700);
+    const scope = cleanText(body.scope, opportunity.primaryFinding, 1_600);
+    const deliverables = (Array.isArray(body.deliverables) ? body.deliverables : offer.deliverables)
+      .map((item) => cleanText(item, "", 220)).filter(Boolean).slice(0, 10);
+    if (!deliverables.length) deliverables.push(...offer.deliverables);
     const expiresAt = new Date(Date.now() + 14 * 86_400_000).toISOString();
     const [proposal] = await db.insert(proposals).values({
       leadId,
       token: makeToken(),
       offerId: offer.id,
-      title: offer.name,
+      title,
       service: offer.service,
-      outcome: offer.outcome,
-      scope: opportunity.primaryFinding,
-      deliverables: JSON.stringify(offer.deliverables),
+      outcome,
+      scope,
+      deliverables: JSON.stringify(deliverables),
       price,
       timeline: String(body.timeline || offer.timeline).slice(0, 100),
       status: "Sent",
       expiresAt,
     }).returning();
     const [updatedLead] = await db.update(leads).set({ status: "Proposal sent", dealValue: price, nextFollowUpAt: new Date(Date.now() + 2 * 86_400_000).toISOString(), updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(leads.id, leadId)).returning();
-    await db.insert(activities).values({ leadId, activityType: "proposal_created", description: `${offer.name} proposal created · $${price.toLocaleString("en-US")}` });
+    await db.insert(activities).values({ leadId, activityType: "proposal_created", description: `${title} proposal created · $${price.toLocaleString("en-US")}` });
     return Response.json({ proposal, lead: updatedLead }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to create proposal" }, { status: 500 });

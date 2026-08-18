@@ -1,6 +1,6 @@
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, leads, proposals } from "@/db/schema";
+import { activities, auditFindings, audits, leads, proposals } from "@/db/schema";
 
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
   try {
@@ -10,6 +10,8 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     if (!proposal) return Response.json({ error: "Proposal not found" }, { status: 404 });
     const [lead] = await db.select().from(leads).where(eq(leads.id, proposal.leadId)).limit(1);
     if (!lead) return Response.json({ error: "Proposal unavailable" }, { status: 404 });
+    const [audit] = await db.select().from(audits).where(eq(audits.leadId, lead.id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
+    const findings = audit ? await db.select({ title: auditFindings.title, evidence: auditFindings.evidence, recommendation: auditFindings.recommendation, category: auditFindings.category, severity: auditFindings.severity }).from(auditFindings).where(eq(auditFindings.auditId, audit.id)).orderBy(auditFindings.sortOrder).limit(3) : [];
     await db.batch([
       db.update(proposals).set({ viewCount: sql`${proposals.viewCount} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(proposals.id, proposal.id)),
       db.update(leads).set({ status: proposal.status === "Accepted" ? "Won" : "Decision pending", updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(leads.id, lead.id)),
@@ -18,6 +20,8 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     return Response.json({
       proposal: { ...proposal, viewCount: proposal.viewCount + 1, deliverables: JSON.parse(proposal.deliverables) },
       lead: { agencyName: lead.agencyName, contactName: lead.contactName, city: lead.city, state: lead.state },
+      audit: audit ? { score: audit.score, pagesAudited: audit.pagesAudited, createdAt: audit.createdAt } : null,
+      findings,
     });
   } catch {
     return Response.json({ error: "Proposal unavailable" }, { status: 500 });
