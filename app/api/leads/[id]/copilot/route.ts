@@ -52,6 +52,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const aiPayload = await aiResponse.json() as Record<string, unknown>;
     if (!aiResponse.ok) {
       const detail = (aiPayload.error as { message?: string } | undefined)?.message;
+      if (aiResponse.status === 429 || /credit|quota|billing/i.test(detail || "")) {
+        return Response.json({ error: "The AI connection is ready, but the OpenAI API project needs billing credits. Add credits, then try again. The website audit and evidence email still work now.", code: "ai_credits_required" }, { status: 402 });
+      }
       throw new Error(detail || "OpenAI could not generate this result");
     }
     const parsed = JSON.parse(extractResponseText(aiPayload));
