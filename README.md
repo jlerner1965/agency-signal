@@ -55,12 +55,33 @@ Requirements:
 - npm
 - Linux environment with `flock`, `curl`, and GNU `timeout`
 
-Install and start the development server:
+First run — installs dependencies, provisions a dashboard login, and applies the
+database migrations to the local Cloudflare D1 database:
 
 ```bash
-npm ci
+npm run setup
 npm run dev
 ```
+
+`npm run setup` prompts for a login email and password. Pass them directly to
+skip the prompts, and add `--owner` to set the name shown on prospect-facing
+reports and proposals:
+
+```bash
+npm run setup -- --email you@example.com --password 'a long passphrase' --owner 'Your Name'
+```
+
+It writes `.dev.vars`, which is git-ignored and read by the local Worker, and
+prints the same values for the hosted runtime. The password itself is never
+stored; only a PBKDF2-SHA-256 derivation of it is. Re-run
+`npm run auth:credentials` at any time to rotate the login — rotating the
+session secret signs out existing sessions.
+
+The app is unusable without these four values, so the hosted runtime needs them
+as secrets: `AGENCYSIGNAL_LOGIN_EMAIL`, `AGENCYSIGNAL_PASSWORD_SALT`,
+`AGENCYSIGNAL_PASSWORD_HASH`, and `AGENCYSIGNAL_SESSION_SECRET`. Keep every
+authentication value out of the repository. `AGENCYSIGNAL_OWNER_NAME` is
+optional and defaults to a name derived from the login address.
 
 Create a production build:
 
@@ -68,17 +89,40 @@ Create a production build:
 npm run build
 ```
 
-Configure `AGENCYSIGNAL_LOGIN_EMAIL`, `AGENCYSIGNAL_PASSWORD_SALT`,
-`AGENCYSIGNAL_PASSWORD_HASH`, and `AGENCYSIGNAL_SESSION_SECRET` in the hosted
-runtime. Keep every authentication value out of the repository. Passwords are
-verified with PBKDF2-SHA-256 at the runtime's maximum supported iteration count
-and are never stored in plaintext.
+Run the build and the test suite:
 
-Generate a new database migration after editing `db/schema.ts`:
+```bash
+npm test
+```
+
+### Database
+
+The hosted runtime applies the migrations packaged into `dist/.openai/drizzle`
+on deploy. Local development applies the same files itself:
+
+```bash
+npm run db:migrate
+```
+
+The command is idempotent and records what it has applied, so it is safe to
+re-run after pulling new migrations. After editing `db/schema.ts`, generate a
+migration and apply it:
 
 ```bash
 npm run db:generate
+npm run db:migrate
 ```
+
+If the dashboard reports that the database has no tables, the migrations have
+not been applied to that environment yet.
+
+### Optional integrations
+
+| Variable | Effect when unset |
+| --- | --- |
+| `OPENAI_API_KEY` | The AI Copilot actions return a 503 explaining that a key is required. Everything else works. |
+| `OPENAI_MODEL` | Defaults to `gpt-5.4-nano`. |
+| `PAGESPEED_API_KEY` | Lighthouse enrichment is attempted unauthenticated and is skipped on failure. Audits still run on the app's own evidence checks. |
 
 ## Important directories
 
@@ -86,9 +130,10 @@ npm run db:generate
 app/                Application pages and API routes
 db/                 Drizzle schema and D1 access
 drizzle/            Generated database migrations
-lib/                Shared types, CSV/search utilities, and server helpers
+lib/                Shared types, scoring, CSV/search utilities, and server helpers
 public/             Static assets
-scripts/            Installation, build, and validation helpers
+scripts/            Setup, install, build, migration, and validation helpers
+tests/              Node test-runner suites
 worker/             Cloudflare Worker entry point
 ```
 

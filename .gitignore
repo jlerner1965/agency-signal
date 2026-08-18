@@ -30,6 +30,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# local worker secrets written by scripts/setup-credentials.mjs
+.dev.vars
+.dev.vars.*
+
 # vercel
 .vercel
 

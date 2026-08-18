@@ -1,17 +1,12 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { runtimeValue } from "@/lib/runtime-env";
 
 const COOKIE_NAME = "__Host-agencysignal_session";
 const SESSION_SECONDS = 60 * 60 * 8;
 const encoder = new TextEncoder();
 
 type SessionPayload = { email: string; exp: number };
-
-async function runtimeValue(key: string) {
-  const { env } = await import("cloudflare:workers");
-  const workerValue = (env as unknown as Record<string, unknown>)[key];
-  return typeof workerValue === "string" ? workerValue : process.env[key] ?? "";
-}
 
 async function configuredEmail() {
   return (await runtimeValue("AGENCYSIGNAL_LOGIN_EMAIL")).trim().toLowerCase();
@@ -74,6 +69,17 @@ export async function requireDashboardUser(returnTo: string) {
 export async function requireDashboardApi() {
   if (await getDashboardSession()) return null;
   return Response.json({ error: "Dashboard login required" }, { status: 401 });
+}
+
+/** False when the workspace has never had a login provisioned. */
+export async function dashboardAuthConfigured() {
+  const [email, salt, hash, secret] = await Promise.all([
+    configuredEmail(),
+    runtimeValue("AGENCYSIGNAL_PASSWORD_SALT"),
+    runtimeValue("AGENCYSIGNAL_PASSWORD_HASH"),
+    runtimeValue("AGENCYSIGNAL_SESSION_SECRET"),
+  ]);
+  return Boolean(email && salt && hash && secret);
 }
 
 export async function verifyDashboardCredentials(email: string, password: string) {
