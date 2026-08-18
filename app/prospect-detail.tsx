@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
 import { buildDigitalBlueprint } from "@/lib/digital-blueprint";
 import { offerCatalog } from "@/lib/sales";
-import type { AuditCheck, AuditSummary, Finding, Lead, Opportunity, Proposal } from "@/lib/types";
+import type { AuditCheck, AuditComparison, AuditSummary, CompetitorAudit, Finding, Lead, Opportunity, Proposal } from "@/lib/types";
 
 type Props = {
   lead: Lead;
@@ -13,6 +13,9 @@ type Props = {
   proposal: Proposal | null;
   pagesAudited: number;
   auditSummary: AuditSummary | null;
+  auditHistory: AuditSummary[];
+  auditComparison: AuditComparison | null;
+  competitors: CompetitorAudit[];
   busy: boolean;
   onClose: () => void;
   onAudit: () => Promise<void>;
@@ -28,7 +31,8 @@ function tone(score: number) { return score < 55 ? "critical" : score < 75 ? "wa
 export default function ProspectDetail(props: Props) {
   const { lead, findings, opportunity, proposal, pagesAudited, busy } = props;
   const googleAudit = buildGooglePresenceAudit(lead);
-  const [tab, setTab] = useState<"summary" | "website" | "google" | "blueprint" | "proposal">("summary");
+  const [tab, setTab] = useState<"summary" | "website" | "google" | "compare" | "blueprint" | "proposal">("summary");
+  const [competitorBusy, setCompetitorBusy] = useState(false);
   const [googleDraft, setGoogleDraft] = useState({
     googleProfileUrl: lead.googleProfileUrl, googlePrimaryCategory: lead.googlePrimaryCategory, rating: lead.rating ?? 0,
     reviewCount: lead.reviewCount, googleReviewRecencyDays: lead.googleReviewRecencyDays, googleResponseRate: lead.googleResponseRate,
@@ -76,9 +80,10 @@ export default function ProspectDetail(props: Props) {
   function useBlueprintInProposal() {
     const chosen = blueprint.recommendations.filter((item) => selectedRecommendations.includes(item.id));
     const items = chosen.length ? chosen : blueprint.recommendations.slice(0, 6);
+    const benchmark = [...props.competitors].sort((a, b) => b.score - a.score)[0];
     setProposalTitle(`${lead.agencyName} Digital Presence Improvement Plan`);
-    setProposalOutcome(`Improve the customer journey from discovery to contact by resolving ${items.length} evidence-backed website and Google presence priorities.`);
-    setProposalScope(items.map((item, index) => `${index + 1}. ${item.title}: ${item.action}`).join("\n"));
+    setProposalOutcome(`Improve the customer journey from discovery to contact by resolving ${items.length} evidence-backed website and Google presence priorities${benchmark ? ` and strengthening the website against the ${benchmark.name} benchmark` : ""}.`);
+    setProposalScope([benchmark && `${benchmark.name} provides a ${benchmark.score}/100 competitive benchmark compared with the current ${lead.score}/100 website score.`, ...items.map((item, index) => `${index + 1}. ${item.title}: ${item.action}`)].filter(Boolean).join("\n"));
     setProposalDeliverables(items.map((item) => item.action).join("\n"));
     setProposalPrice(Math.max(2500, Math.round(items.reduce((sum, item) => sum + (item.effort === "Major" ? 1600 : item.effort === "Moderate" ? 900 : 450), 0) / 100) * 100));
     setProposalTimeline(items.some((item) => item.effort === "Major") ? "5–7 weeks" : "3–4 weeks");
@@ -97,9 +102,31 @@ export default function ProspectDetail(props: Props) {
   }
   async function copyProposal() { if (proposal) await navigator.clipboard.writeText(`${window.location.origin}/proposal/${proposal.token}`); }
 
+  async function addCompetitor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setCompetitorBusy(true);
+    const form = event.currentTarget; const body = Object.fromEntries(new FormData(form).entries());
+    try {
+      const response = await fetch(`/api/leads/${lead.id}/competitors`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Unable to audit competitor");
+      form.reset(); await props.onRefresh();
+    } catch (error) { alert(error instanceof Error ? error.message : "Unable to audit competitor"); }
+    finally { setCompetitorBusy(false); }
+  }
+
+  async function removeCompetitor(id: number) {
+    setCompetitorBusy(true);
+    try {
+      const response = await fetch(`/api/leads/${lead.id}/competitors?competitorId=${id}`, { method: "DELETE" });
+      const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Unable to remove competitor"); await props.onRefresh();
+    } catch (error) { alert(error instanceof Error ? error.message : "Unable to remove competitor"); }
+    finally { setCompetitorBusy(false); }
+  }
+
+  const deltaLabel = (value: number) => value > 0 ? `+${value}` : String(value);
+
   return <aside className="audit-detail-panel">
     <header className="audit-detail-head"><div className="detail-identity"><span className="detail-avatar">{initials(lead.agencyName)}</span><div><h2>{lead.agencyName}</h2><p>{lead.website.replace(/^https?:\/\//, "")}</p></div></div><button onClick={props.onClose} aria-label="Close audit">×</button></header>
-    <nav className="audit-detail-tabs"><button className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>Summary</button><button className={tab === "website" ? "active" : ""} onClick={() => setTab("website")}>Website</button><button className={tab === "google" ? "active" : ""} onClick={() => setTab("google")}>Google</button><button className={tab === "blueprint" ? "active" : ""} onClick={() => setTab("blueprint")}>Blueprint</button><button className={tab === "proposal" ? "active" : ""} onClick={() => setTab("proposal")}>Proposal</button></nav>
+    <nav className="audit-detail-tabs"><button className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>Summary</button><button className={tab === "website" ? "active" : ""} onClick={() => setTab("website")}>Website</button><button className={tab === "google" ? "active" : ""} onClick={() => setTab("google")}>Google</button><button className={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>Competitors</button><button className={tab === "blueprint" ? "active" : ""} onClick={() => setTab("blueprint")}>Blueprint</button><button className={tab === "proposal" ? "active" : ""} onClick={() => setTab("proposal")}>Proposal</button></nav>
 
     <div className="audit-detail-scroll">
       {tab === "summary" && <><section className="presence-overall"><div className={`large-score ${combinedScore ? tone(combinedScore) : "neutral"}`}><strong>{combinedScore || "—"}</strong><span>Digital presence</span></div><div><p className="eyebrow">Overall review</p><h3>{combinedScore ? combinedScore >= 75 ? "Strong foundation with specific opportunities" : combinedScore >= 55 ? "Visible gaps are limiting the customer journey" : "Major website and Google improvements are available" : "Complete both reviews for the full score"}</h3><p>The combined score weights the website at 60% and Google presence at 40%.</p></div></section>
@@ -109,6 +136,8 @@ export default function ProspectDetail(props: Props) {
 
       {tab === "website" && <><section className="audit-section-intro"><div><p className="eyebrow">Website audit</p><h3>Multi-page customer experience review</h3><p>Content checks across up to five pages, plus mobile Lighthouse performance, SEO, accessibility, and browser best practices when available.</p></div><button className="primary-button" disabled={busy} onClick={props.onAudit}>{busy ? "Auditing…" : lead.score ? "Run fresh audit" : "Run website audit"}</button></section>
         {lead.score ? <><section className="website-score-grid">{[["Overall", lead.score], ["Visibility", lead.visibilityScore], ["Conversion", lead.conversionScore], ["Technical", lead.technicalScore], ["Trust", lead.trustScore]].map(([label, value]) => <article key={label}><span>{label}</span><strong className={tone(Number(value))}>{value}</strong><i><b style={{ width: `${value}%` }} /></i></article>)}</section>
+        {(props.auditSummary?.screenshotKey || props.auditComparison) && <section className="audit-proof-grid">{props.auditSummary?.screenshotKey && <figure><img src={`/api/audit-screenshots/${props.auditSummary.screenshotKey}`} alt={`Rendered mobile view of ${lead.agencyName}`} /><figcaption><strong>Rendered mobile evidence</strong><span>Captured during the Lighthouse audit—not a stock image.</span></figcaption></figure>}{props.auditComparison && <div className="audit-change-card"><p className="eyebrow">Since the previous audit</p><strong className={props.auditComparison.scoreDelta >= 0 ? "improved" : "declined"}>{deltaLabel(props.auditComparison.scoreDelta)} points</strong><div>{[["Visibility", props.auditComparison.visibilityDelta], ["Conversion", props.auditComparison.conversionDelta], ["Technical", props.auditComparison.technicalDelta], ["Trust", props.auditComparison.trustDelta]].map(([label, value]) => <span key={String(label)}><b>{label}</b><em className={Number(value) >= 0 ? "up" : "down"}>{deltaLabel(Number(value))}</em></span>)}</div>{props.auditComparison.resolved.length > 0 && <p><b>Resolved:</b> {props.auditComparison.resolved.join(" · ")}</p>}{props.auditComparison.regressed.length > 0 && <p><b>Regressed:</b> {props.auditComparison.regressed.join(" · ")}</p>}</div>}</section>}
+        {props.auditHistory.length > 1 && <details className="audit-history"><summary>View audit history ({props.auditHistory.length})</summary><div>{props.auditHistory.map((audit, index) => <article key={audit.id}><span>{new Date(audit.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span><strong>{audit.score}/100</strong><small>{audit.pagesAudited} pages · {audit.confidenceScore} confidence</small>{index === 0 && <b>Current</b>}</article>)}</div></details>}
         {props.auditSummary && <section className="audit-evidence-summary"><div><span>Audit confidence</span><strong>{props.auditSummary.confidenceScore}/100</strong><small>{props.auditSummary.confidenceScore >= 80 ? "High evidence coverage" : props.auditSummary.confidenceScore >= 60 ? "Moderate evidence coverage" : "Limited evidence coverage—review manually"}</small></div><div><span>Checks</span><strong>{props.auditSummary.checksPassed} passed · {props.auditSummary.checksFailed} failed</strong><small>{props.auditSummary.checksUnverified} unverified · {pagesAudited} pages inspected</small></div><p>Scores are earned from observable evidence. Unverified checks earn no points and lower confidence.</p></section>}
         {auditChecks.length > 0 && <details className="audit-methodology"><summary>View all {auditChecks.length} scored checks</summary><div>{auditChecks.map((item) => <article key={item.id}><span className={`check-status ${item.status}`}>{item.status === "passed" ? "✓" : item.status === "failed" ? "!" : "?"}</span><div><strong>{item.label}</strong><small>{item.category} · {item.weight} points · {item.evidence}</small></div></article>)}</div></details>}
         <section className="detailed-findings"><div className="section-title-row"><div><p className="eyebrow">Detailed findings</p><h3>{findings.length} evidence-backed opportunities</h3></div><span>{pagesAudited || 1} pages reviewed</span></div>{findings.map((finding, index) => <article key={`${finding.title}-${index}`}><div className="finding-number">{String(index + 1).padStart(2, "0")}</div><div><div className="finding-labels"><span>{finding.category}</span><span className={`severity-flag ${finding.severity.toLowerCase()}`}>{finding.severity}</span></div><h4>{finding.title}</h4><dl><div><dt>Evidence</dt><dd>{finding.evidence}</dd></div><div><dt>Why it matters</dt><dd>{finding.impact}</dd></div><div><dt>Recommended fix</dt><dd>{finding.recommendation}</dd></div></dl></div></article>)}</section></> : <div className="audit-empty large"><strong>Website audit not run</strong><p>The review checks the homepage and high-value internal pages for discoverability, conversion, mobile experience, accessibility, and trust.</p><button className="primary-button" disabled={busy} onClick={props.onAudit}>{busy ? "Auditing…" : "Run website audit"}</button></div>}</>}
@@ -117,6 +146,12 @@ export default function ProspectDetail(props: Props) {
         <section className="google-score-form"><label className="span-two">Google Business Profile URL<input value={googleDraft.googleProfileUrl} onChange={(event) => setGoogleDraft({ ...googleDraft, googleProfileUrl: event.target.value })} placeholder="https://g.page/..." /></label><label className="span-two">Primary business category<input value={googleDraft.googlePrimaryCategory} onChange={(event) => setGoogleDraft({ ...googleDraft, googlePrimaryCategory: event.target.value })} placeholder="Example: HVAC contractor" /></label><label>Star rating<input type="number" min="0" max="5" step="0.1" value={googleDraft.rating} onChange={(event) => setGoogleDraft({ ...googleDraft, rating: Number(event.target.value) })} /></label><label>Review count<input type="number" min="0" value={googleDraft.reviewCount} onChange={(event) => setGoogleDraft({ ...googleDraft, reviewCount: Number(event.target.value) })} /></label><label>Newest review<select value={googleDraft.googleReviewRecencyDays} onChange={(event) => setGoogleDraft({ ...googleDraft, googleReviewRecencyDays: Number(event.target.value) })}><option value="0">Not verified</option><option value="7">Within 7 days</option><option value="30">Within 30 days</option><option value="90">Within 90 days</option><option value="180">3–6 months ago</option><option value="365">More than 6 months</option></select></label><label>Owner response rate<input type="number" min="0" max="100" value={googleDraft.googleResponseRate} onChange={(event) => setGoogleDraft({ ...googleDraft, googleResponseRate: Number(event.target.value) })} /><small>Percent of reviews answered</small></label><label>Business photos<input type="number" min="0" value={googleDraft.googlePhotoCount} onChange={(event) => setGoogleDraft({ ...googleDraft, googlePhotoCount: Number(event.target.value) })} /></label><label>Newest Google post<select value={googleDraft.googlePostRecencyDays} onChange={(event) => setGoogleDraft({ ...googleDraft, googlePostRecencyDays: Number(event.target.value) })}><option value="0">No post / unknown</option><option value="7">Within 7 days</option><option value="30">Within 30 days</option><option value="90">Within 90 days</option><option value="180">3–6 months ago</option></select></label><label>Profile completeness<input type="number" min="0" max="100" value={googleDraft.googleProfileCompleteness} onChange={(event) => setGoogleDraft({ ...googleDraft, googleProfileCompleteness: Number(event.target.value) })} /><small>Estimated percent complete</small></label><label>Name, address, phone match<select value={googleDraft.googleNapConsistent ? "yes" : "no"} onChange={(event) => setGoogleDraft({ ...googleDraft, googleNapConsistent: event.target.value === "yes" })}><option value="no">No / not verified</option><option value="yes">Yes</option></select></label></section>
         <button className="save-google-review" disabled={busy} onClick={() => props.onPatch({ ...googleDraft, googlePresenceReviewed: true }, "Google presence scorecard saved")}>{busy ? "Saving…" : `Save Google review · ${draftGoogleAudit.score}/100`}</button>
         <section className="google-findings"><div className="section-title-row"><div><p className="eyebrow">Live score explanation</p><h3>{draftGoogleAudit.findings.length} improvement areas</h3></div></div>{draftGoogleAudit.findings.map((finding, index) => <article key={`${finding.title}-${index}`}><span className={`severity-flag ${finding.severity.toLowerCase()}`}>{finding.severity}</span><div><strong>{finding.title}</strong><p>{finding.evidence}</p><small>{finding.recommendation}</small></div></article>)}</section></>}
+
+      {tab === "compare" && <section className="competitor-workspace"><div className="audit-section-intro"><div><p className="eyebrow">Competitive benchmark</p><h3>Compare against real alternatives</h3><p>Audit up to three competitor websites using the same scoring model. This is a website comparison—not a claim about search rank or business quality.</p></div></div>
+        {lead.score > 0 && <section className="competitor-table"><div className="competitor-row heading"><span>Business</span><span>Overall</span><span>Visibility</span><span>Conversion</span><span>Technical</span><span>Trust</span><span /></div><div className="competitor-row primary"><span><strong>{lead.agencyName}</strong><small>Your audited site</small></span><b>{lead.score}</b><b>{lead.visibilityScore}</b><b>{lead.conversionScore}</b><b>{lead.technicalScore}</b><b>{lead.trustScore}</b><span>Baseline</span></div>{props.competitors.map((competitor) => <div className="competitor-row" key={competitor.id}><span><strong>{competitor.name}</strong><small>{competitor.website.replace(/^https?:\/\//, "")}</small></span><b className={competitor.score > lead.score ? "ahead" : "behind"}>{competitor.score}</b><b>{competitor.visibilityScore}</b><b>{competitor.conversionScore}</b><b>{competitor.technicalScore}</b><b>{competitor.trustScore}</b><button disabled={competitorBusy} onClick={() => removeCompetitor(competitor.id)}>Remove</button>{competitor.screenshotKey && <figure><img src={`/api/audit-screenshots/${competitor.screenshotKey}`} alt={`Rendered mobile view of ${competitor.name}`} /><figcaption>{competitor.pagesAudited} pages · {competitor.confidenceScore} confidence</figcaption></figure>}</div>)}</section>}
+        {props.competitors.length < 3 && <form className="competitor-form" onSubmit={addCompetitor}><div><p className="eyebrow">Add competitor</p><h3>Run the same evidence audit</h3></div><label>Competitor name<input name="name" required placeholder="Competitor business" /></label><label>Website<input name="website" required inputMode="url" placeholder="https://competitor.com" /></label><button className="primary-button" disabled={competitorBusy}>{competitorBusy ? "Auditing competitor…" : "Audit and compare"}</button></form>}
+        {!lead.score && <div className="audit-empty large"><strong>Audit the primary business first</strong><p>The comparison needs a baseline score before competitor sites can be evaluated.</p><button className="primary-button" disabled={busy} onClick={props.onAudit}>Run website audit</button></div>}
+      </section>}
 
       {tab === "blueprint" && <section className="blueprint-builder"><div className="audit-section-intro"><div><p className="eyebrow">Digital Presence Blueprint</p><h3>Turn findings into an implementation plan</h3><p>Select the work worth proposing. Scope, deliverables, investment, and timing are generated from these choices and remain editable.</p></div></div>
         <section className="blueprint-score"><div><span>Current score</span><strong>{blueprint.currentScore || "—"}</strong></div><i>→</i><div><span>Estimated after selected priorities</span><strong>{blueprint.projectedScore}</strong><small>{blueprint.projectedLabel}</small></div></section>

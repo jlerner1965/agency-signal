@@ -73,6 +73,27 @@ export const audits = sqliteTable("audits", {
   checksUnverified: integer("checks_unverified").notNull().default(0),
   checkSummary: text("check_summary").notNull().default("[]"),
   lighthouseSummary: text("lighthouse_summary").notNull().default("null"),
+  screenshotKey: text("screenshot_key").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const competitorAudits = sqliteTable("competitor_audits", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  leadId: integer("lead_id").notNull(),
+  name: text("name").notNull(),
+  website: text("website").notNull(),
+  score: integer("score").notNull(),
+  visibilityScore: integer("visibility_score").notNull(),
+  conversionScore: integer("conversion_score").notNull(),
+  technicalScore: integer("technical_score").notNull(),
+  trustScore: integer("trust_score").notNull(),
+  pagesAudited: integer("pages_audited").notNull().default(1),
+  confidenceScore: integer("confidence_score").notNull().default(0),
+  checksPassed: integer("checks_passed").notNull().default(0),
+  checksFailed: integer("checks_failed").notNull().default(0),
+  checkSummary: text("check_summary").notNull().default("[]"),
+  lighthouseSummary: text("lighthouse_summary").notNull().default("null"),
+  screenshotKey: text("screenshot_key").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

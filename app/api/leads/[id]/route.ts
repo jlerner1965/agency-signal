@@ -1,9 +1,10 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, auditFindings, audits, leads, proposals, reportEvents } from "@/db/schema";
+import { activities, auditFindings, audits, competitorAudits, leads, proposals, reportEvents } from "@/db/schema";
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildOpportunity } from "@/lib/opportunity";
 import { nextSequenceDate, qualificationLabel, salesStages } from "@/lib/sales";
+import { compareAudits } from "@/lib/audit-history";
 
 const allowedStatuses = new Set(salesStages);
 const textFields = ["contactName", "email", "phone", "carrier", "businessObjective", "painPoint", "currentProvider", "decisionMaker", "budgetRange", "desiredTimeline", "nextCommittedStep", "objection", "lossReason"] as const;
@@ -138,13 +139,15 @@ export async function GET(
     const db = await getDb();
     const [lead] = await db.select().from(leads).where(eq(leads.id, id)).limit(1);
     if (!lead) return Response.json({ error: "Lead not found" }, { status: 404 });
-    const [latestAudit] = await db.select().from(audits).where(eq(audits.leadId, id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
+    const auditHistory = await db.select().from(audits).where(eq(audits.leadId, id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(8);
+    const latestAudit = auditHistory[0] ?? null;
     const findings = latestAudit
       ? await db.select().from(auditFindings).where(eq(auditFindings.auditId, latestAudit.id)).orderBy(auditFindings.sortOrder)
       : [];
     const activityRows = await db.select().from(activities).where(eq(activities.leadId, id)).orderBy(desc(activities.createdAt), desc(activities.id)).limit(30);
     const eventRows = await db.select().from(reportEvents).where(eq(reportEvents.leadId, id)).orderBy(desc(reportEvents.createdAt), desc(reportEvents.id)).limit(30);
     const [proposal] = await db.select().from(proposals).where(eq(proposals.leadId, id)).orderBy(desc(proposals.createdAt), desc(proposals.id)).limit(1);
+    const competitors = await db.select().from(competitorAudits).where(eq(competitorAudits.leadId, id)).orderBy(desc(competitorAudits.createdAt), desc(competitorAudits.id));
     const reportActivity = eventRows.map((event) => ({
       id: `report-${event.id}`,
       activityType: event.eventType,
@@ -155,7 +158,7 @@ export async function GET(
       ...activityRows.map((row) => ({ ...row, id: `activity-${row.id}` })),
       ...reportActivity,
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 30);
-    return Response.json({ activities: combined, audit: latestAudit ?? null, findings, opportunity: buildOpportunity(lead, findings), proposal: proposal ?? null });
+    return Response.json({ activities: combined, audit: latestAudit, auditHistory, auditComparison: compareAudits(auditHistory[0], auditHistory[1]), competitors, findings, opportunity: buildOpportunity(lead, findings), proposal: proposal ?? null });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load activity";
     return Response.json({ error: message }, { status: 500 });

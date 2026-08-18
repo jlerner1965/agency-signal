@@ -97,7 +97,43 @@ export type AuditSummary = {
   checksUnverified: number;
   checkSummary: string;
   lighthouseSummary: string;
+  screenshotKey: string;
   createdAt: string;
+};
+
+export type CompetitorAudit = {
+  id: number;
+  leadId: number;
+  name: string;
+  website: string;
+  score: number;
+  visibilityScore: number;
+  conversionScore: number;
+  technicalScore: number;
+  trustScore: number;
+  pagesAudited: number;
+  confidenceScore: number;
+  checksPassed: number;
+  checksFailed: number;
+  checkSummary: string;
+  lighthouseSummary: string;
+  screenshotKey: string;
+  createdAt: string;
+};
+
+export type AuditComparison = {
+  previousAuditId: number;
+  currentAuditId: number;
+  scoreDelta: number;
+  visibilityDelta: number;
+  conversionDelta: number;
+  technicalDelta: number;
+  trustDelta: number;
+  confidenceDelta: number;
+  resolved: string[];
+  regressed: string[];
+  previousDate: string;
+  currentDate: string;
 };
 
 export type Activity = {

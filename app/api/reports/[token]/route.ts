@@ -1,8 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { leads, reportEvents } from "@/db/schema";
+import { audits, competitorAudits, leads, reportEvents } from "@/db/schema";
 import { getLeadByToken } from "@/lib/server-data";
 import { buildOpportunity } from "@/lib/opportunity";
+import { compareAudits } from "@/lib/audit-history";
 
 export async function GET(
   _request: Request,
@@ -13,6 +14,8 @@ export async function GET(
     const report = await getLeadByToken(token);
     if (!report) return Response.json({ error: "Report not found" }, { status: 404 });
     const db = await getDb();
+    const auditHistory = await db.select().from(audits).where(eq(audits.leadId, report.lead.id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(2);
+    const competitors = await db.select().from(competitorAudits).where(eq(competitorAudits.leadId, report.lead.id)).orderBy(desc(competitorAudits.createdAt), desc(competitorAudits.id));
     await db.batch([
       db.insert(reportEvents).values({ leadId: report.lead.id, eventType: "report_viewed" }),
       db
@@ -47,8 +50,11 @@ export async function GET(
         checksPassed: audit.checksPassed,
         checksFailed: audit.checksFailed,
         checksUnverified: audit.checksUnverified,
+        screenshotKey: audit.screenshotKey,
         createdAt: audit.createdAt,
       } : null,
+      auditComparison: compareAudits(auditHistory[0], auditHistory[1]),
+      competitors: competitors.map((item) => ({ id: item.id, name: item.name, website: item.website, score: item.score, visibilityScore: item.visibilityScore, conversionScore: item.conversionScore, technicalScore: item.technicalScore, trustScore: item.trustScore, confidenceScore: item.confidenceScore, pagesAudited: item.pagesAudited, screenshotKey: item.screenshotKey })),
       opportunity: buildOpportunity(lead, findings),
     });
   } catch (error) {

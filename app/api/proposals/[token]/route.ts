@@ -1,6 +1,6 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, auditFindings, audits, leads, proposals } from "@/db/schema";
+import { activities, auditFindings, audits, competitorAudits, leads, proposals } from "@/db/schema";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
 
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
@@ -14,6 +14,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     const [audit] = await db.select().from(audits).where(eq(audits.leadId, lead.id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
     const websiteFindings = audit ? await db.select({ title: auditFindings.title, evidence: auditFindings.evidence, recommendation: auditFindings.recommendation, category: auditFindings.category, severity: auditFindings.severity }).from(auditFindings).where(eq(auditFindings.auditId, audit.id)).orderBy(auditFindings.sortOrder).limit(3) : [];
     const googleAudit = buildGooglePresenceAudit(lead);
+    const competitors = await db.select({ id: competitorAudits.id, name: competitorAudits.name, score: competitorAudits.score }).from(competitorAudits).where(eq(competitorAudits.leadId, lead.id)).orderBy(desc(competitorAudits.score)).limit(3);
     const findings = [...websiteFindings.slice(0, 2), ...googleAudit.findings.slice(0, 2)].slice(0, 4);
     await db.batch([
       db.update(proposals).set({ viewCount: sql`${proposals.viewCount} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(proposals.id, proposal.id)),
@@ -25,6 +26,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
       lead: { agencyName: lead.agencyName, contactName: lead.contactName, city: lead.city, state: lead.state },
       audit: audit && audit.confidenceScore > 0 ? { score: audit.score, pagesAudited: audit.pagesAudited, confidenceScore: audit.confidenceScore, checksPassed: audit.checksPassed, checksFailed: audit.checksFailed, createdAt: audit.createdAt } : null,
       googleAudit: googleAudit.reviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,
+      competitors,
       findings,
     });
   } catch {
