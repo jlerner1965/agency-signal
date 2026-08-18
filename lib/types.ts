@@ -46,6 +46,13 @@ export type Finding = {
   sortOrder: number;
 };
 
+export type Activity = {
+  id: string;
+  activityType: string;
+  description: string;
+  createdAt: string;
+};
+
 export type PublicReportLead = Pick<
   Lead,
   | "agencyName"

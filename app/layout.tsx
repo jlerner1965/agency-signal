@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AgencySignal — Audit-to-Sale Workspace",
-  description: "Evidence-led website audits and sales pipeline management for local insurance agencies.",
+  description: "Evidence-led website audits and a practical outreach pipeline for local businesses.",
   other: {
     "codex-preview": "development",
   },

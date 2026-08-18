@@ -89,28 +89,28 @@ async function inspectWebsite(input: string) {
 
   if (!title) {
     visibility -= 35;
-    addFinding(findings, "Visibility", "High", "Homepage title is missing", "No HTML title element was detected on the audited page.", "Add a concise title naming the agency, primary service and local market.", "A descriptive title helps search engines and prospects understand the page before visiting it.", finalUrl);
+    addFinding(findings, "Visibility", "High", "Homepage title is missing", "No HTML title element was detected on the audited page.", "Add a concise title naming the business, primary service and market.", "A descriptive title helps search engines and prospects understand the page before visiting it.", finalUrl);
   } else if (title.length < 25 || title.length > 70) {
     visibility -= 12;
     addFinding(findings, "Visibility", "Medium", "Homepage title is poorly sized", `The detected title is ${title.length} characters: “${title.slice(0, 100)}”.`, "Use a focused title of roughly 35–65 characters with service and location context.", "A clearer title can improve search-result comprehension and message alignment.", finalUrl);
   }
   if (!description) {
     visibility -= 25;
-    addFinding(findings, "Visibility", "High", "Meta description is missing", "No meta description was detected in the homepage HTML.", "Write a specific description explaining the agency’s audience, market and next step.", "A strong description gives searchers a reason to choose this result.", finalUrl);
+    addFinding(findings, "Visibility", "High", "Meta description is missing", "No meta description was detected in the homepage HTML.", "Write a specific description explaining the business’s audience, offer and next step.", "A strong description gives searchers a reason to choose this result.", finalUrl);
   } else if (description.length < 70) {
     visibility -= 10;
     addFinding(findings, "Visibility", "Low", "Search description is underdeveloped", `The detected description is only ${description.length} characters.`, "Expand it into a complete, benefit-led summary without keyword stuffing.", "A complete summary communicates value before a prospect reaches the site.", finalUrl);
   }
   if (h1Count === 0) {
     visibility -= 20;
-    addFinding(findings, "Visibility", "High", "Primary page heading is missing", "The audit found no H1 element on the homepage.", "Add one clear H1 that states the agency’s main value proposition.", "A clear heading improves page structure for visitors and search systems.", finalUrl);
+    addFinding(findings, "Visibility", "High", "Primary page heading is missing", "The audit found no H1 element on the homepage.", "Add one clear H1 that states the business’s main value proposition.", "A clear heading improves page structure for visitors and search systems.", finalUrl);
   } else if (h1Count > 1) {
     visibility -= 8;
     addFinding(findings, "Visibility", "Low", "Heading hierarchy is ambiguous", `${h1Count} H1 elements were detected.`, "Use one primary H1 and organize supporting sections under H2 headings.", "A predictable hierarchy makes the page easier to scan and interpret.", finalUrl);
   }
   if (!/application\/ld\+json/i.test(html)) {
     visibility -= 15;
-    addFinding(findings, "Visibility", "Medium", "Structured business data is absent", "No JSON-LD structured data block was detected.", "Add valid Organization or InsuranceAgency structured data using verified business details.", "Structured data gives machines a clearer description of the agency and its identity.", finalUrl);
+    addFinding(findings, "Visibility", "Medium", "Structured business data is absent", "No JSON-LD structured data block was detected.", "Add valid Organization or LocalBusiness structured data using verified business details.", "Structured data gives machines a clearer description of the business and its identity.", finalUrl);
   }
 
   if (!/name=["']viewport["']/i.test(html)) {
@@ -152,11 +152,11 @@ async function inspectWebsite(input: string) {
   }
   if (!/property=["']og:image["']/i.test(html)) {
     trust -= 15;
-    addFinding(findings, "Trust", "Low", "Shared links lack a branded preview image", "No Open Graph image was detected.", "Add a branded social preview image with the agency name and core offer.", "Professional link previews improve credibility when pages are shared.", finalUrl);
+    addFinding(findings, "Trust", "Low", "Shared links lack a branded preview image", "No Open Graph image was detected.", "Add a branded social preview image with the business name and core offer.", "Professional link previews improve credibility when pages are shared.", finalUrl);
   }
   if (!/(privacy policy|privacy notice)/i.test(html)) {
     trust -= 18;
-    addFinding(findings, "Trust", "Medium", "Privacy information is not discoverable", "No visible privacy-policy reference was detected on the homepage.", "Link a clear privacy policy from the footer and beside sensitive lead forms.", "Insurance prospects are more likely to share information when data handling is transparent.", finalUrl);
+    addFinding(findings, "Trust", "Medium", "Privacy information is not discoverable", "No visible privacy-policy reference was detected on the homepage.", "Link a clear privacy policy from the footer and beside lead forms.", "Prospects are more likely to share information when data handling is transparent.", finalUrl);
   }
 
   visibility = Math.max(0, visibility);

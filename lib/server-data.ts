@@ -1,40 +1,28 @@
-import { count, desc, eq, lt, sql } from "drizzle-orm";
+import { desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditFindings, audits, leads } from "@/db/schema";
-import { sampleFindings, sampleLeads } from "@/lib/sample-data";
+import { activities, auditFindings, audits, leads, reportEvents } from "@/db/schema";
 
-export async function ensureSeedData() {
+const demoBusinesses = [
+  "Front Range Insurance Group",
+  "Boulder Valley Coverage",
+  "Mile High Risk Advisors",
+  "Northern Colorado Insurance",
+  "Pikes Peak Protection",
+  "Western Slope Benefit Partners",
+];
+
+export async function prepareLeadData() {
   const db = await getDb();
-  const [result] = await db.select({ value: count() }).from(leads);
-  if ((result?.value ?? 0) === 0) {
-    for (const sample of sampleLeads) {
-      const record = Object.fromEntries(
-        Object.entries(sample).filter(([key]) => key !== "id"),
-      ) as Omit<typeof sample, "id">;
-      const [lead] = await db.insert(leads).values(record).returning();
-      if (lead.score > 0) {
-        const [audit] = await db
-          .insert(audits)
-          .values({
-            leadId: lead.id,
-            website: lead.website,
-            score: lead.score,
-            visibilityScore: lead.visibilityScore,
-            conversionScore: lead.conversionScore,
-            technicalScore: lead.technicalScore,
-            trustScore: lead.trustScore,
-            responseStatus: 200,
-          })
-          .returning();
-        await db.insert(auditFindings).values(
-          sampleFindings.map((finding) => ({
-            ...finding,
-            auditId: audit.id,
-            affectedUrl: lead.website,
-          })),
-        );
-      }
-    }
+  const demoRows = await db.select({ id: leads.id }).from(leads).where(inArray(leads.agencyName, demoBusinesses));
+  const demoIds = demoRows.map((row) => row.id);
+  if (demoIds.length) {
+    const demoAudits = await db.select({ id: audits.id }).from(audits).where(inArray(audits.leadId, demoIds));
+    const demoAuditIds = demoAudits.map((row) => row.id);
+    if (demoAuditIds.length) await db.delete(auditFindings).where(inArray(auditFindings.auditId, demoAuditIds));
+    await db.delete(audits).where(inArray(audits.leadId, demoIds));
+    await db.delete(reportEvents).where(inArray(reportEvents.leadId, demoIds));
+    await db.delete(activities).where(inArray(activities.leadId, demoIds));
+    await db.delete(leads).where(inArray(leads.id, demoIds));
   }
 
   // Replace early human-readable demo tokens with opaque 128-bit links.
@@ -45,7 +33,7 @@ export async function ensureSeedData() {
 }
 
 export async function getLeadByToken(token: string) {
-  await ensureSeedData();
+  await prepareLeadData();
   const db = await getDb();
   const [lead] = await db
     .select()

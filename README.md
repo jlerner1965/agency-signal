@@ -1,10 +1,11 @@
 # AgencySignal
 
-AgencySignal is an evidence-led audit-to-sale workspace for local insurance agencies. It combines prospect tracking, public-homepage auditing, shareable reports, engagement signals, and outreach preparation in one focused application.
+AgencySignal is an evidence-led audit-to-sale workspace for growing businesses. It combines prospect imports, public-homepage auditing, shareable opportunity briefs, engagement signals, personalized Gmail outreach, and follow-up management in one focused application.
 
 ## Features
 
-- Persistent agency lead pipeline
+- Persistent business lead pipeline
+- CSV import with common lead-source field mapping and duplicate detection
 - Add and manage prospect records
 - Live public-homepage audits
 - Deterministic visibility, conversion, technical, and trust scoring
@@ -13,7 +14,8 @@ AgencySignal is an evidence-led audit-to-sale workspace for local insurance agen
 - Report-view tracking
 - Prospect review-request capture
 - Email/password protected dashboard and APIs with signed, time-limited sessions
-- Personalized outreach copy
+- Personalized outreach copy and prefilled Gmail compose
+- Sales notes, follow-up scheduling, and real activity history
 - Follow-up and pipeline-stage management
 - Responsive desktop and mobile interface
 
@@ -65,7 +67,7 @@ npm run db:generate
 app/                Application pages and API routes
 db/                 Drizzle schema and D1 access
 drizzle/            Generated database migrations
-lib/                Shared types, sample data, and server helpers
+lib/                Shared types, CSV/search utilities, and server helpers
 public/             Static assets
 scripts/            Installation, build, and validation helpers
 worker/             Cloudflare Worker entry point
@@ -75,9 +77,9 @@ worker/             Cloudflare Worker entry point
 
 - Website auditing reviews publicly observable homepage evidence.
 - Findings should be reviewed by a person before prospect outreach.
-- Outreach is copied for approval rather than automatically sent; report responses are stored directly on the lead.
+- Outreach opens as a prefilled Gmail draft for human review and sending; direct API sending requires a separately configured Google OAuth integration.
 - Google Places and Business Profile integrations require separate credentials and are not configured in this repository.
-- Sample agencies use fictional contact details and demonstration websites.
+- No fictional lead records are seeded. The workspace starts with only real user-imported or manually entered prospects.
 
 ## Data and security
 
