@@ -5,9 +5,11 @@ AgencySignal is an evidence-led audit-to-sale workspace for growing businesses. 
 ## Features
 
 - Persistent business lead pipeline
+- Prioritized daily action queue for overdue, engaged, audit-ready, and unaudited prospects
 - CSV import with common lead-source field mapping and duplicate detection
 - Add and manage prospect records
 - Live multi-page website audits covering up to five prioritized pages
+- Controlled batch auditing for up to ten prospects, processed two at a time with progress and failure visibility
 - Deterministic visibility, conversion, technical, and trust scoring
 - Evidence-backed findings with recommendations
 - Transparent opportunity scoring and recommended service matching

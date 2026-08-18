@@ -97,11 +97,15 @@ a { color: inherit; }
 .table-toolbar h2 { margin: 0; font-size: 13px; }
 .table-toolbar p { margin: 4px 0 0; color: #8b95a5; font-size: 9px; }
 .table-controls { display: flex; gap: 7px; }
+.batch-controls { align-items: center; }.batch-controls .secondary-button, .batch-controls .primary-button { min-height: 34px; white-space: nowrap; }
+.batch-button { min-width: 112px; }.select-button { color: #516073; }
 .table-controls select, .stage-control select { min-height: 34px; padding: 0 30px 0 10px; border: 1px solid #dce2e9; background: white; border-radius: 6px; color: #475467; font-size: 10px; outline: none; }
+.batch-progress { padding: 10px 16px; display: grid; grid-template-columns: 210px 1fr; gap: 18px; align-items: center; border-bottom: 1px solid #dce8e1; background: #f3faf6; }.batch-progress > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.batch-progress strong { color: #2d5948; font-size: 9px; }.batch-progress span { color: #708178; font-size: 8px; }.batch-progress > i { height: 5px; overflow: hidden; border-radius: 6px; background: #dce8e1; }.batch-progress > i b { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width .2s ease; }.batch-progress.complete { background: #edf8f2; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; min-width: 920px; }
 th { height: 36px; padding: 0 11px; background: #f8f9fb; color: #7c8797; font-size: 8px; font-weight: 750; text-align: left; text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--line); }
 td { height: 59px; padding: 0 11px; border-bottom: 1px solid #edf0f3; color: #4d596b; font-size: 10px; }
+.select-column { width: 35px; padding-left: 13px; padding-right: 4px; }.select-column input { width: 14px; height: 14px; accent-color: var(--green); cursor: pointer; }
 tbody tr { cursor: pointer; transition: background .14s ease; }
 tbody tr:hover, tbody tr.selected { background: #f7faf8; }
 tbody tr.selected { box-shadow: inset 2px 0 var(--green); }
@@ -267,7 +271,7 @@ tbody tr:last-child td { border-bottom: 0; }
 @media (max-width: 820px) {
   .app-shell { display: block; }.sidebar { position: static; width: 100%; height: auto; padding: 12px 16px; flex-direction: row; align-items: center; overflow-x: auto; }.sidebar > .brand-lockup, .workspace-label, .sidebar-divider, .nav-kicker, .secondary-nav, .sidebar-bottom { display: none; }.primary-nav { display: flex; margin: 0; min-width: max-content; }.primary-nav button { min-height: 35px; }.nav-count { display: none; }
   .topbar { padding: 0 18px; }.mobile-brand { display: none; }.global-search { width: 58%; }.sync-state, .quiet-button { display: none; }
-  .workspace-content { padding: 24px 18px 35px; }.page-heading { align-items: flex-start; }.heading-actions .secondary-button { display: none; }
+  .workspace-content { padding: 24px 18px 35px; }.page-heading { align-items: flex-start; }.heading-actions .secondary-button { display: none; }.table-toolbar { align-items: flex-start; gap: 10px; }.batch-controls { flex-wrap: wrap; justify-content: flex-end; }.batch-progress { grid-template-columns: 1fr; gap: 7px; }
   .detail-panel { width: min(360px, 92vw); }
   .report-hero-grid, .report-summary, .report-opportunity-grid, .report-cta-inner { grid-template-columns: 1fr; gap: 38px; }.report-score-card { width: 260px; min-height: 230px; }.report-summary { align-items: start; }.finding-columns { grid-template-columns: 1fr; gap: 18px; }.report-footer > div { grid-template-columns: 1fr; gap: 9px; }
 }

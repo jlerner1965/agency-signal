@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { filterLeadRows, matchesLeadSearch } from "../lib/lead-search.js";
+import { buildDailyQueue, filterLeadRows, matchesLeadSearch, nextLeadAction } from "../lib/lead-search.js";
 
 const leads = [
   {
@@ -53,4 +53,15 @@ test("global search overrides section and stage filters", () => {
     query: "Marcus",
   });
   assert.deepEqual(rows.map((lead) => lead.agencyName), ["Summit Coverage"]);
+});
+
+test("daily queue prioritizes due follow-ups, engagement, and audit-ready leads", () => {
+  const queue = buildDailyQueue([
+    { ...leads[0], agencyName: "Audit Ready" },
+    { ...leads[1], agencyName: "Warm Report", status: "Report viewed", nextFollowUpAt: null },
+    { ...leads[0], agencyName: "Due Now", status: "Contacted", nextFollowUpAt: "2026-08-17T12:00:00Z" },
+    { ...leads[0], agencyName: "Closed", status: "Won" },
+  ], new Date("2026-08-18T12:00:00Z"));
+  assert.deepEqual(queue.map((lead) => lead.agencyName), ["Due Now", "Warm Report", "Audit Ready"]);
+  assert.equal(nextLeadAction(queue[0], new Date("2026-08-18T12:00:00Z")), "Follow up now");
 });

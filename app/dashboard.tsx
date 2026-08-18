@@ -2,12 +2,13 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { parseLeadCsv } from "@/lib/csv-leads";
-import { filterLeadRows } from "@/lib/lead-search";
+import { buildDailyQueue, filterLeadRows, nextLeadAction } from "@/lib/lead-search";
 import { buildOpportunity } from "@/lib/opportunity";
 import type { Activity, Finding, Lead, LeadStatus, Opportunity } from "@/lib/types";
 
 const pipelineStatuses: LeadStatus[] = ["New", "Audit ready", "Contacted", "Report viewed", "Follow-up due", "Meeting booked", "Won", "Lost"];
 const sectionMeta = {
+  Today: { eyebrow: "Daily execution", title: "Today’s action queue", description: "Work the prospects most likely to move forward right now." },
   Pipeline: { eyebrow: "Sales workspace", title: "Business pipeline", description: "Turn website opportunities into relevant sales conversations." },
   Audits: { eyebrow: "Evidence desk", title: "Audit review", description: "Find credible, specific reasons to contact each business." },
   Engagement: { eyebrow: "Intent signals", title: "Report engagement", description: "Prioritize prospects who are reading their opportunity briefs." },
@@ -31,7 +32,7 @@ function NavIcon({ label }: { label: string }) { return <span className="nav-ico
 export default function Dashboard({ ownerName }: { ownerName: string }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedId, setSelectedId] = useState(-1);
-  const [section, setSection] = useState<Section>("Pipeline");
+  const [section, setSection] = useState<Section>("Today");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All stages");
   const [showAdd, setShowAdd] = useState(false);
@@ -42,6 +43,8 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
   const [pagesAudited, setPagesAudited] = useState(0);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<number[]>([]);
+  const [batchState, setBatchState] = useState({ complete: 0, total: 0, failed: 0, current: "" });
   const [notes, setNotes] = useState("");
   const [followUp, setFollowUp] = useState("");
   const [contactDraft, setContactDraft] = useState({ contactName: "", email: "", phone: "", carrier: "" });
@@ -98,8 +101,10 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
   }, [selectedId]);
 
   const filtered = useMemo(() => filterLeadRows(leads, { section, statusFilter, query }), [leads, query, section, statusFilter]);
+  const auditableVisible = useMemo(() => filtered.filter((lead) => !["Won", "Lost"].includes(lead.status)).slice(0, 10), [filtered]);
   const stats = useMemo(() => ({
     total: leads.length,
+    actions: buildDailyQueue(leads).length,
     ready: leads.filter((lead) => lead.status === "Audit ready").length,
     engaged: leads.filter((lead) => lead.reportViews > 0).length,
     due: leads.filter((lead) => lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) <= new Date()).length,
@@ -108,6 +113,40 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
   function replaceLead(updated: Lead) { setLeads((current) => current.map((lead) => lead.id === updated.id ? updated : lead)); }
   function chooseLead(lead: Lead) { setSelectedId(lead.id); setNotes(lead.notes ?? ""); setFollowUp(inputDate(lead.nextFollowUpAt)); setContactDraft({ contactName: lead.contactName, email: lead.email, phone: lead.phone, carrier: lead.carrier }); setFindings([]); setOpportunity(buildOpportunity(lead, [])); setPagesAudited(0); }
   function changeSection(nextSection: Section) { setSection(nextSection); setQuery(""); }
+  function toggleLead(id: number) {
+    setSelectedLeadIds((current) => {
+      if (current.includes(id)) return current.filter((leadId) => leadId !== id);
+      if (current.length >= 10) { setToast("Select up to 10 prospects per audit batch"); return current; }
+      return [...current, id];
+    });
+  }
+  function selectVisible() {
+    const selectable = auditableVisible.map((lead) => lead.id);
+    const allSelected = selectable.length > 0 && selectable.every((id) => selectedLeadIds.includes(id));
+    setSelectedLeadIds(allSelected ? [] : selectable);
+  }
+  async function runBatchAudit() {
+    const targets = leads.filter((lead) => selectedLeadIds.includes(lead.id) && !["Won", "Lost"].includes(lead.status)).slice(0, 10);
+    if (!targets.length || busy) return;
+    setBusy(true); setBatchState({ complete: 0, total: targets.length, failed: 0, current: "Starting audits" });
+    let complete = 0; let failed = 0;
+    for (let index = 0; index < targets.length; index += 2) {
+      const group = targets.slice(index, index + 2);
+      await Promise.all(group.map(async (lead) => {
+        setBatchState((current) => ({ ...current, current: lead.agencyName }));
+        try {
+          const response = await fetch("/api/audit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: lead.id, website: lead.website }) });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Audit failed");
+          replaceLead(payload.lead);
+          if (lead.id === selectedId) { setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.pagesAudited ?? 1); }
+        } catch { failed += 1; }
+        complete += 1; setBatchState({ complete, total: targets.length, failed, current: lead.agencyName });
+      }));
+    }
+    setSelectedLeadIds([]); setBusy(false); setBatchState({ complete, total: targets.length, failed, current: "Complete" });
+    setToast(`${complete - failed} audits completed${failed ? ` · ${failed} could not be audited` : ""}`);
+  }
   async function patchLead(values: Record<string, unknown>, success: string) {
     if (!selected) return;
     setBusy(true);
@@ -189,6 +228,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
         <div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div>
         <div className="workspace-label"><span className="workspace-dot" /> Growth workspace</div>
         <nav className="primary-nav" aria-label="Primary navigation">
+          <button className={section === "Today" ? "active" : ""} onClick={() => changeSection("Today")}><NavIcon label="✓" /> Today <span className="nav-count">{stats.actions}</span></button>
           <button className={section === "Pipeline" ? "active" : ""} onClick={() => changeSection("Pipeline")}><NavIcon label="P" /> Pipeline <span className="nav-count">{stats.total}</span></button>
           <button className={section === "Audits" ? "active" : ""} onClick={() => changeSection("Audits")}><NavIcon label="A" /> Audits <span className="nav-count">{stats.ready}</span></button>
           <button className={section === "Engagement" ? "active" : ""} onClick={() => changeSection("Engagement")}><NavIcon label="E" /> Engagement <span className="nav-count">{stats.engaged}</span></button>
@@ -202,16 +242,17 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
         <div className="workspace-content">
           <div className="page-heading"><div><p className="eyebrow">{meta.eyebrow}</p><h1>{meta.title}</h1><p>{meta.description}</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => setShowImport(true)}>Import CSV</button><button className="primary-button" onClick={() => setShowAdd(true)}>Add business</button></div></div>
           <section className="metrics-grid" aria-label="Pipeline summary">
-            <article><div className="metric-label"><span>Total prospects</span></div><strong>{stats.total}</strong><p>Real businesses in your pipeline</p></article>
+            <article><div className="metric-label"><span>Today’s queue</span><b className="trend">Prioritized</b></div><strong>{stats.actions}</strong><p>Open prospects needing action</p></article>
             <article><div className="metric-label"><span>Audits ready</span><b className="trend">Act now</b></div><strong>{stats.ready}</strong><p>Evidence ready for outreach</p></article>
             <article><div className="metric-label"><span>Engaged reports</span><b className="trend positive">High intent</b></div><strong>{stats.engaged}</strong><p>Prospects viewing your brief</p></article>
             <article><div className="metric-label"><span>Follow-ups due</span><b className="trend">Today</b></div><strong>{stats.due}</strong><p>Conversations needing action</p></article>
           </section>
           <section className="pipeline-card">
-            <div className="table-toolbar"><div><h2>{query.trim() ? "Search results" : "Priority prospects"}</h2><p aria-live="polite">{filtered.length} {filtered.length === 1 ? "record" : "records"}{query.trim() ? ` matching “${query.trim()}” across the full pipeline` : " · sorted by recent activity"}</p></div><div className="table-controls"><select aria-label="Filter by pipeline stage" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} disabled={Boolean(query.trim())}><option>All stages</option>{pipelineStatuses.map((status) => <option key={status}>{status}</option>)}</select></div></div>
-            <div className="table-wrap"><table><thead><tr><th>Business</th><th>Industry</th><th>Audit score</th><th>Opportunity</th><th>Stage</th><th>Signal</th><th>Next action</th><th><span className="sr-only">Open</span></th></tr></thead><tbody>{filtered.map((lead) => (
+            <div className="table-toolbar"><div><h2>{query.trim() ? "Search results" : section === "Today" ? "Prioritized worklist" : "Priority prospects"}</h2><p aria-live="polite">{filtered.length} {filtered.length === 1 ? "record" : "records"}{query.trim() ? ` matching “${query.trim()}” across the full pipeline` : section === "Today" ? " · due follow-ups and warm signals first" : " · sorted by recent activity"}</p></div><div className="table-controls batch-controls"><button className="secondary-button select-button" onClick={selectVisible}>{auditableVisible.length > 0 && auditableVisible.every((lead) => selectedLeadIds.includes(lead.id)) ? "Clear selection" : "Select visible"}</button><button className="primary-button batch-button" disabled={busy || !selectedLeadIds.length} onClick={runBatchAudit}>{busy && batchState.total ? `${batchState.complete}/${batchState.total} auditing…` : `Audit selected${selectedLeadIds.length ? ` (${selectedLeadIds.length})` : ""}`}</button><select aria-label="Filter by pipeline stage" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} disabled={Boolean(query.trim())}><option>All stages</option>{pipelineStatuses.map((status) => <option key={status}>{status}</option>)}</select></div></div>
+            {batchState.total > 0 && <div className={`batch-progress ${batchState.complete === batchState.total ? "complete" : ""}`}><div><strong>{batchState.complete === batchState.total ? "Batch complete" : `Auditing ${batchState.current}`}</strong><span>{batchState.complete} of {batchState.total}{batchState.failed ? ` · ${batchState.failed} failed` : ""}</span></div><i><b style={{ width: `${(batchState.complete / batchState.total) * 100}%` }} /></i></div>}
+            <div className="table-wrap"><table><thead><tr><th className="select-column"><input type="checkbox" aria-label="Select visible prospects" checked={auditableVisible.length > 0 && auditableVisible.every((lead) => selectedLeadIds.includes(lead.id))} onChange={selectVisible} /></th><th>Business</th><th>Industry</th><th>Audit score</th><th>Opportunity</th><th>Stage</th><th>Signal</th><th>Next action</th><th><span className="sr-only">Open</span></th></tr></thead><tbody>{filtered.map((lead) => (
               <tr key={lead.id} className={lead.id === selectedId ? "selected" : ""} onClick={() => chooseLead(lead)}>
-                <td><div className="agency-cell"><span className="agency-avatar">{initials(lead.agencyName)}</span><span><strong>{lead.agencyName}</strong><small>{lead.contactName || "No contact"}{lead.city ? ` · ${lead.city}${lead.state ? `, ${lead.state}` : ""}` : ""}</small></span></div></td><td><span className="carrier-text">{lead.carrier}</span></td><td>{lead.score ? <span className={`score-badge ${scoreTone(lead.score)}`}><i style={{ "--score": `${lead.score * 3.6}deg` } as React.CSSProperties} />{lead.score}</span> : <span className="not-run">Not run</span>}</td><td>{lead.score ? <span className={`priority-pill priority-${buildOpportunity(lead, []).priorityLabel.toLowerCase().replaceAll(" ", "-")}`}><strong>{buildOpportunity(lead, []).priorityScore}</strong>{buildOpportunity(lead, []).primaryService}</span> : <span className="not-run">Needs audit</span>}</td><td><span className={`stage stage-${lead.status.toLowerCase().replaceAll(" ", "-")}`}>{lead.status}</span></td><td>{lead.reportViews ? <span className="signal"><i /> {lead.reportViews} view{lead.reportViews === 1 ? "" : "s"}</span> : <span className="muted">No activity</span>}</td><td><span className={lead.status === "Follow-up due" ? "due" : "next-action"}>{lead.nextFollowUpAt ? friendlyDate(lead.nextFollowUpAt) : !lead.score ? "Run audit" : lead.status === "Audit ready" ? "Send brief" : "Add follow-up"}</span></td><td><button className="row-open" aria-label={`Open ${lead.agencyName}`} onClick={(event) => { event.stopPropagation(); chooseLead(lead); }}>›</button></td>
+                <td className="select-column"><input type="checkbox" aria-label={`Select ${lead.agencyName}`} checked={selectedLeadIds.includes(lead.id)} disabled={["Won", "Lost"].includes(lead.status)} onClick={(event) => event.stopPropagation()} onChange={() => toggleLead(lead.id)} /></td><td><div className="agency-cell"><span className="agency-avatar">{initials(lead.agencyName)}</span><span><strong>{lead.agencyName}</strong><small>{lead.contactName || "No contact"}{lead.city ? ` · ${lead.city}${lead.state ? `, ${lead.state}` : ""}` : ""}</small></span></div></td><td><span className="carrier-text">{lead.carrier}</span></td><td>{lead.score ? <span className={`score-badge ${scoreTone(lead.score)}`}><i style={{ "--score": `${lead.score * 3.6}deg` } as React.CSSProperties} />{lead.score}</span> : <span className="not-run">Not run</span>}</td><td>{lead.score ? <span className={`priority-pill priority-${buildOpportunity(lead, []).priorityLabel.toLowerCase().replaceAll(" ", "-")}`}><strong>{buildOpportunity(lead, []).priorityScore}</strong>{buildOpportunity(lead, []).primaryService}</span> : <span className="not-run">Needs audit</span>}</td><td><span className={`stage stage-${lead.status.toLowerCase().replaceAll(" ", "-")}`}>{lead.status}</span></td><td>{lead.reportViews ? <span className="signal"><i /> {lead.reportViews} view{lead.reportViews === 1 ? "" : "s"}</span> : <span className="muted">No activity</span>}</td><td><span className={lead.status === "Follow-up due" ? "due" : "next-action"}>{nextLeadAction(lead)}</span></td><td><button className="row-open" aria-label={`Open ${lead.agencyName}`} onClick={(event) => { event.stopPropagation(); chooseLead(lead); }}>›</button></td>
               </tr>))}</tbody></table>{!filtered.length && <div className="empty-state"><strong>{leads.length ? "No businesses match this view." : "Build your first real prospect list."}</strong><span>{leads.length ? "Try a different search or pipeline stage." : "Import a CSV or add one business, then run a website audit."}</span>{leads.length ? <button className="secondary-button" onClick={() => { setQuery(""); setStatusFilter("All stages"); }}>Reset view</button> : <div className="empty-actions"><button className="secondary-button" onClick={() => setShowImport(true)}>Import CSV</button><button className="primary-button" onClick={() => setShowAdd(true)}>Add business</button></div>}</div>}</div>
           </section>
         </div>
