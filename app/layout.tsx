@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AgencySignal — Audit-to-Sale Workspace",
+  title: "AgencySignal — Digital Presence Audits",
   description: "Evidence-led website audits and a practical outreach pipeline for local businesses.",
   other: {
     "codex-preview": "development",

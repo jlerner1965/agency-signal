@@ -25,6 +25,15 @@ export type Lead = {
   status: LeadStatus;
   rating: number | null;
   reviewCount: number;
+  googleProfileUrl: string;
+  googlePrimaryCategory: string;
+  googleReviewRecencyDays: number;
+  googleResponseRate: number;
+  googlePhotoCount: number;
+  googlePostRecencyDays: number;
+  googleProfileCompleteness: number;
+  googleNapConsistent: boolean;
+  googleReviewedAt: string | null;
   score: number;
   visibilityScore: number;
   conversionScore: number;

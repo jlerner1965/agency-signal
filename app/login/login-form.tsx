@@ -30,7 +30,7 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
     <main className="login-shell">
       <div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div>
       <section className="login-card">
-        <div><p className="eyebrow">Private sales workspace</p><h1>Welcome back.</h1><p>Sign in to manage leads, run audits and track prospect engagement.</p></div>
+        <div><p className="eyebrow">Private audit workspace</p><h1>Welcome back.</h1><p>Sign in to review websites, score Google presence, and create evidence-backed proposals.</p></div>
         <form onSubmit={submit}>
           <label>Email address<input name="email" type="email" autoComplete="username" required autoFocus /></label>
           <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>

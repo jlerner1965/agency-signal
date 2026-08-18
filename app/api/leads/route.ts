@@ -51,6 +51,7 @@ export async function POST(request: Request) {
         carrier: String(body.carrier ?? "Uncategorized").trim() || "Uncategorized",
         email: String(body.email ?? "").trim(),
         phone: String(body.phone ?? "").trim(),
+        googleProfileUrl: String(body.googleProfileUrl ?? "").trim(),
         notes: String(body.notes ?? "").trim(),
         status: "Identified",
         reportToken: makeToken(),

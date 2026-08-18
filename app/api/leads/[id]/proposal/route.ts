@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { activities, auditFindings, audits, leads, proposals } from "@/db/schema";
 import { buildOpportunity } from "@/lib/opportunity";
 import { offerCatalog, offerForOpportunity } from "@/lib/sales";
+import { buildGooglePresenceAudit } from "@/lib/google-presence";
 
 function makeToken() { return crypto.randomUUID().replaceAll("-", ""); }
 function cleanText(value: unknown, fallback: string, maximum: number) {
@@ -25,11 +26,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const [audit] = await db.select().from(audits).where(eq(audits.leadId, leadId)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
     const findings = audit ? await db.select().from(auditFindings).where(eq(auditFindings.auditId, audit.id)).orderBy(auditFindings.sortOrder) : [];
     const opportunity = buildOpportunity(lead, findings);
-    const offer = offerCatalog.find((item) => item.id === body.offerId) ?? offerForOpportunity(opportunity);
+    const googleAudit = buildGooglePresenceAudit(lead);
+    const recommended = googleAudit.reviewed && googleAudit.score < 60 && lead.score < 65
+      ? offerCatalog.find((item) => item.id === "digital-presence-plan")
+      : googleAudit.reviewed && googleAudit.score < 60
+        ? offerCatalog.find((item) => item.id === "google-presence")
+        : offerForOpportunity(opportunity);
+    const offer = offerCatalog.find((item) => item.id === body.offerId) ?? recommended ?? offerForOpportunity(opportunity);
     const price = Math.max(500, Math.min(250000, Math.round(Number(body.price) || offer.price)));
     const title = cleanText(body.title, offer.name, 160);
     const outcome = cleanText(body.outcome, offer.outcome, 700);
-    const scope = cleanText(body.scope, opportunity.primaryFinding, 1_600);
+    const defaultScope = googleAudit.findings[0]
+      ? `${opportunity.primaryFinding}. Google presence review: ${googleAudit.findings[0].title}.`
+      : opportunity.primaryFinding;
+    const scope = cleanText(body.scope, defaultScope, 1_600);
     const deliverables = (Array.isArray(body.deliverables) ? body.deliverables : offer.deliverables)
       .map((item) => cleanText(item, "", 220)).filter(Boolean).slice(0, 10);
     if (!deliverables.length) deliverables.push(...offer.deliverables);

@@ -8,6 +8,7 @@ import { nextSequenceDate, qualificationLabel, salesStages } from "@/lib/sales";
 const allowedStatuses = new Set(salesStages);
 const textFields = ["contactName", "email", "phone", "carrier", "businessObjective", "painPoint", "currentProvider", "decisionMaker", "budgetRange", "desiredTimeline", "nextCommittedStep", "objection", "lossReason"] as const;
 const scoreFields = ["fitScore", "needScore", "intentScore", "urgencyScore", "reachabilityScore"] as const;
+const googleIntegerFields = ["reviewCount", "googleReviewRecencyDays", "googleResponseRate", "googlePhotoCount", "googlePostRecencyDays", "googleProfileCompleteness"] as const;
 
 export async function PATCH(
   request: Request,
@@ -49,11 +50,22 @@ export async function PATCH(
     for (const field of scoreFields) {
       if (body[field] !== undefined) values[field] = Math.max(0, Math.min(100, Math.round(Number(body[field]) || 0)));
     }
+    if (typeof body.googleProfileUrl === "string") values.googleProfileUrl = body.googleProfileUrl.trim();
+    if (typeof body.googlePrimaryCategory === "string") values.googlePrimaryCategory = body.googlePrimaryCategory.trim();
+    if (body.rating !== undefined) values.rating = Math.max(0, Math.min(5, Number(body.rating) || 0));
+    for (const field of googleIntegerFields) {
+      if (body[field] !== undefined) values[field] = Math.max(0, Math.round(Number(body[field]) || 0));
+    }
+    if (body.googleNapConsistent !== undefined) values.googleNapConsistent = Boolean(body.googleNapConsistent);
+    if (body.googlePresenceReviewed) values.googleReviewedAt = sql`CURRENT_TIMESTAMP`;
     if (body.dealValue !== undefined) values.dealValue = Math.max(0, Math.round(Number(body.dealValue) || 0));
     if (body.nextFollowUpAt === null || typeof body.nextFollowUpAt === "string") values.nextFollowUpAt = body.nextFollowUpAt || null;
     if (body.outreachOpened) {
       values.lastContactedAt = sql`CURRENT_TIMESTAMP`;
       values.status = "Contacted";
+    }
+    if (body.googlePresenceReviewed) {
+      await db.insert(activities).values({ leadId: id, activityType: "google_presence_reviewed", description: "Google presence scorecard saved" });
     }
     if (requestedStatus && ["Replied", "Discovery scheduled", "Qualified", "Proposal sent", "Decision pending"].includes(requestedStatus)) values.sequenceStatus = "Paused";
     if (requestedStatus && ["Won", "Lost", "Nurture", "Disqualified"].includes(requestedStatus)) values.sequenceStatus = "Completed";
