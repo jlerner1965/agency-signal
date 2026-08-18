@@ -52,6 +52,7 @@ export async function POST(request: Request) {
         email: String(body.email ?? "").trim(),
         phone: String(body.phone ?? "").trim(),
         notes: String(body.notes ?? "").trim(),
+        status: "Identified",
         reportToken: makeToken(),
       })
       .returning();

@@ -38,7 +38,7 @@ export async function POST(
         .set({
           email: report.lead.email || email,
           contactName: report.lead.contactName || name,
-          status: "Meeting booked",
+          status: "Discovery scheduled",
           notes: report.lead.notes ? `${note}\n\n${report.lead.notes}` : note,
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })

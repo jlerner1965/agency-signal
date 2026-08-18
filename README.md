@@ -13,6 +13,13 @@ AgencySignal is an evidence-led audit-to-sale workspace for growing businesses. 
 - Deterministic visibility, conversion, technical, and trust scoring
 - Evidence-backed findings with recommendations
 - Transparent opportunity scoring and recommended service matching
+- Five-factor closing readiness scoring: fit, need, intent, urgency, and reachability
+- Qualification and discovery records with stage exit requirements
+- Prospect-specific discovery call questions and objection-response guidance
+- Human-reviewed five-step outreach sequences that pause when a prospect advances
+- Defined offer catalog with outcomes, deliverables, pricing, timelines, and proof criteria
+- Trackable public proposals with view counts, expiration, and recorded acceptance
+- Revenue dashboard covering pipeline value, proposals, wins, close rate, and loss reasons
 - Personalized “best evidence” outreach angles and next-action guidance
 - Public prospect reports protected by opaque 128-bit links
 - Report-view tracking
@@ -82,6 +89,7 @@ worker/             Cloudflare Worker entry point
 - Website auditing reviews publicly observable evidence from the homepage and up to four prioritized internal pages.
 - Findings should be reviewed by a person before prospect outreach.
 - Outreach opens as a prefilled Gmail draft for human review and sending; direct API sending requires a separately configured Google OAuth integration.
+- Proposal acceptance records approval and contact information; a final service agreement, payment collection, and fulfillment onboarding remain human-controlled.
 - Google Places and Business Profile integrations require separate credentials and are not configured in this repository.
 - No fictional lead records are seeded. The workspace starts with only real user-imported or manually entered prospects.
 

@@ -4,20 +4,25 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { parseLeadCsv } from "@/lib/csv-leads";
 import { buildDailyQueue, filterLeadRows, nextLeadAction } from "@/lib/lead-search";
 import { buildOpportunity } from "@/lib/opportunity";
-import type { Activity, Finding, Lead, LeadStatus, Opportunity } from "@/lib/types";
+import { qualificationBreakdown, qualificationLabel, salesStages } from "@/lib/sales";
+import type { Activity, Finding, Lead, LeadStatus, Opportunity, Proposal } from "@/lib/types";
+import ProspectDetail from "./prospect-detail";
+import RevenueDashboard from "./revenue-dashboard";
 
-const pipelineStatuses: LeadStatus[] = ["New", "Audit ready", "Contacted", "Report viewed", "Follow-up due", "Meeting booked", "Won", "Lost"];
+const pipelineStatuses = salesStages as LeadStatus[];
 const sectionMeta = {
   Today: { eyebrow: "Daily execution", title: "Today’s action queue", description: "Work the prospects most likely to move forward right now." },
   Pipeline: { eyebrow: "Sales workspace", title: "Business pipeline", description: "Turn website opportunities into relevant sales conversations." },
   Audits: { eyebrow: "Evidence desk", title: "Audit review", description: "Find credible, specific reasons to contact each business." },
   Engagement: { eyebrow: "Intent signals", title: "Report engagement", description: "Prioritize prospects who are reading their opportunity briefs." },
   Followups: { eyebrow: "Daily action", title: "Follow-ups", description: "Keep every promising conversation moving toward a meeting." },
+  Revenue: { eyebrow: "Revenue intelligence", title: "Conversion and revenue", description: "Measure qualified pipeline, proposals, wins, and the reasons deals are lost." },
 } as const;
 type Section = keyof typeof sectionMeta;
 
 function initials(name: string) { return name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
 function scoreTone(score: number) { return score === 0 ? "neutral" : score < 55 ? "critical" : score < 70 ? "watch" : "good"; }
+function qualificationResultTone(score: number) { return score >= 70 ? "high-priority" : score >= 55 ? "strong-opportunity" : "develop"; }
 function friendlyDate(value: string | null) {
   if (!value) return "Not scheduled";
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
@@ -42,6 +47,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
+  const [proposal, setProposal] = useState<Proposal | null>(null);
   const [pagesAudited, setPagesAudited] = useState(0);
   const [selectedLeadIds, setSelectedLeadIds] = useState<number[]>([]);
   const [batchState, setBatchState] = useState({ complete: 0, total: 0, failed: 0, current: "" });
@@ -93,25 +99,36 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
   }, []);
 
   const selected = selectedId === -1 ? undefined : leads.find((lead) => lead.id === selectedId);
+  async function loadDetail(id: number) {
+    try {
+      const response = await fetch(`/api/leads/${id}`); const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to load prospect");
+      setActivities(payload.activities ?? []); setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.audit?.pagesAudited ?? 0); setProposal(payload.proposal ?? null);
+    } catch { setActivities([]); setFindings([]); setOpportunity(null); setPagesAudited(0); setProposal(null); }
+  }
   useEffect(() => {
     if (!selectedId || selectedId < 0) return;
-    fetch(`/api/leads/${selectedId}`).then((response) => response.json()).then((payload) => {
-      setActivities(payload.activities ?? []); setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.audit?.pagesAudited ?? 0);
-    }).catch(() => { setActivities([]); setFindings([]); setOpportunity(null); setPagesAudited(0); });
+    fetch(`/api/leads/${selectedId}`).then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to load prospect");
+      return payload;
+    }).then((payload) => {
+      setActivities(payload.activities ?? []); setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.audit?.pagesAudited ?? 0); setProposal(payload.proposal ?? null);
+    }).catch(() => { setActivities([]); setFindings([]); setOpportunity(null); setPagesAudited(0); setProposal(null); });
   }, [selectedId]);
 
   const filtered = useMemo(() => filterLeadRows(leads, { section, statusFilter, query }), [leads, query, section, statusFilter]);
-  const auditableVisible = useMemo(() => filtered.filter((lead) => !["Won", "Lost"].includes(lead.status)).slice(0, 10), [filtered]);
+  const auditableVisible = useMemo(() => filtered.filter((lead) => !["Won", "Lost", "Disqualified"].includes(lead.status)).slice(0, 10), [filtered]);
   const stats = useMemo(() => ({
     total: leads.length,
     actions: buildDailyQueue(leads).length,
-    ready: leads.filter((lead) => lead.status === "Audit ready").length,
+    ready: leads.filter((lead) => lead.status === "Audited").length,
     engaged: leads.filter((lead) => lead.reportViews > 0).length,
     due: leads.filter((lead) => lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) <= new Date()).length,
   }), [leads]);
 
   function replaceLead(updated: Lead) { setLeads((current) => current.map((lead) => lead.id === updated.id ? updated : lead)); }
-  function chooseLead(lead: Lead) { setSelectedId(lead.id); setNotes(lead.notes ?? ""); setFollowUp(inputDate(lead.nextFollowUpAt)); setContactDraft({ contactName: lead.contactName, email: lead.email, phone: lead.phone, carrier: lead.carrier }); setFindings([]); setOpportunity(buildOpportunity(lead, [])); setPagesAudited(0); }
+  function chooseLead(lead: Lead) { setSelectedId(lead.id); setNotes(lead.notes ?? ""); setFollowUp(inputDate(lead.nextFollowUpAt)); setContactDraft({ contactName: lead.contactName, email: lead.email, phone: lead.phone, carrier: lead.carrier }); setFindings([]); setOpportunity(buildOpportunity(lead, [])); setPagesAudited(0); setProposal(null); }
   function changeSection(nextSection: Section) { setSection(nextSection); setQuery(""); }
   function toggleLead(id: number) {
     setSelectedLeadIds((current) => {
@@ -126,7 +143,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
     setSelectedLeadIds(allSelected ? [] : selectable);
   }
   async function runBatchAudit() {
-    const targets = leads.filter((lead) => selectedLeadIds.includes(lead.id) && !["Won", "Lost"].includes(lead.status)).slice(0, 10);
+    const targets = leads.filter((lead) => selectedLeadIds.includes(lead.id) && !["Won", "Lost", "Disqualified"].includes(lead.status)).slice(0, 10);
     if (!targets.length || busy) return;
     setBusy(true); setBatchState({ complete: 0, total: targets.length, failed: 0, current: "Starting audits" });
     let complete = 0; let failed = 0;
@@ -155,7 +172,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Update failed");
       replaceLead(payload.lead); setToast(success);
-      const activityResponse = await fetch(`/api/leads/${selected.id}`); const detail = await activityResponse.json(); setActivities(detail.activities ?? []); setFindings(detail.findings ?? []); setOpportunity(detail.opportunity ?? null); setPagesAudited(detail.audit?.pagesAudited ?? 0);
+      await loadDetail(selected.id);
     } catch (error) { setToast(error instanceof Error ? error.message : "Update failed"); }
     finally { setBusy(false); }
   }
@@ -233,6 +250,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
           <button className={section === "Audits" ? "active" : ""} onClick={() => changeSection("Audits")}><NavIcon label="A" /> Audits <span className="nav-count">{stats.ready}</span></button>
           <button className={section === "Engagement" ? "active" : ""} onClick={() => changeSection("Engagement")}><NavIcon label="E" /> Engagement <span className="nav-count">{stats.engaged}</span></button>
           <button className={section === "Followups" ? "active" : ""} onClick={() => changeSection("Followups")}><NavIcon label="F" /> Follow-ups <span className="nav-count">{stats.due}</span></button>
+          <button className={section === "Revenue" ? "active" : ""} onClick={() => changeSection("Revenue")}><NavIcon label="$" /> Revenue <span className="nav-count">{leads.filter((lead) => lead.status === "Won").length}</span></button>
         </nav>
         <div className="sidebar-bottom"><div className="user-row"><span className="avatar">JL</span><span><strong>{ownerName}</strong><small>Workspace owner</small></span><button aria-label="Sign out" title="Sign out" onClick={signOut}>↗</button></div></div>
       </aside>
@@ -241,7 +259,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
         <header className="topbar"><div className="mobile-brand"><span className="brand-mark">A</span> AgencySignal</div><label className="global-search"><span aria-hidden="true">⌕</span><input ref={searchRef} aria-label="Search all leads" value={query} onChange={(event) => { setQuery(event.target.value); if (event.target.value.trim()) setSelectedId(-1); }} placeholder="Search all leads" />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery("")}>×</button> : <kbd>⌘ K</kbd>}</label><div className="top-actions"><span className={`sync-state ${dataMode}`}><i />{dataMode === "live" ? "Saved" : dataMode === "loading" ? "Connecting" : "Connection error"}</span><button className="primary-button" onClick={() => setShowAdd(true)}>+ Add business</button></div></header>
         <div className="workspace-content">
           <div className="page-heading"><div><p className="eyebrow">{meta.eyebrow}</p><h1>{meta.title}</h1><p>{meta.description}</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => setShowImport(true)}>Import CSV</button><button className="primary-button" onClick={() => setShowAdd(true)}>Add business</button></div></div>
-          <section className="metrics-grid" aria-label="Pipeline summary">
+          {section === "Revenue" ? <RevenueDashboard leads={leads} onOpen={chooseLead} /> : <><section className="metrics-grid" aria-label="Pipeline summary">
             <article><div className="metric-label"><span>Today’s queue</span><b className="trend">Prioritized</b></div><strong>{stats.actions}</strong><p>Open prospects needing action</p></article>
             <article><div className="metric-label"><span>Audits ready</span><b className="trend">Act now</b></div><strong>{stats.ready}</strong><p>Evidence ready for outreach</p></article>
             <article><div className="metric-label"><span>Engaged reports</span><b className="trend positive">High intent</b></div><strong>{stats.engaged}</strong><p>Prospects viewing your brief</p></article>
@@ -250,13 +268,15 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
           <section className="pipeline-card">
             <div className="table-toolbar"><div><h2>{query.trim() ? "Search results" : section === "Today" ? "Prioritized worklist" : "Priority prospects"}</h2><p aria-live="polite">{filtered.length} {filtered.length === 1 ? "record" : "records"}{query.trim() ? ` matching “${query.trim()}” across the full pipeline` : section === "Today" ? " · due follow-ups and warm signals first" : " · sorted by recent activity"}</p></div><div className="table-controls batch-controls"><button className="secondary-button select-button" onClick={selectVisible}>{auditableVisible.length > 0 && auditableVisible.every((lead) => selectedLeadIds.includes(lead.id)) ? "Clear selection" : "Select visible"}</button><button className="primary-button batch-button" disabled={busy || !selectedLeadIds.length} onClick={runBatchAudit}>{busy && batchState.total ? `${batchState.complete}/${batchState.total} auditing…` : `Audit selected${selectedLeadIds.length ? ` (${selectedLeadIds.length})` : ""}`}</button><select aria-label="Filter by pipeline stage" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} disabled={Boolean(query.trim())}><option>All stages</option>{pipelineStatuses.map((status) => <option key={status}>{status}</option>)}</select></div></div>
             {batchState.total > 0 && <div className={`batch-progress ${batchState.complete === batchState.total ? "complete" : ""}`}><div><strong>{batchState.complete === batchState.total ? "Batch complete" : `Auditing ${batchState.current}`}</strong><span>{batchState.complete} of {batchState.total}{batchState.failed ? ` · ${batchState.failed} failed` : ""}</span></div><i><b style={{ width: `${(batchState.complete / batchState.total) * 100}%` }} /></i></div>}
-            <div className="table-wrap"><table><thead><tr><th className="select-column"><input type="checkbox" aria-label="Select visible prospects" checked={auditableVisible.length > 0 && auditableVisible.every((lead) => selectedLeadIds.includes(lead.id))} onChange={selectVisible} /></th><th>Business</th><th>Industry</th><th>Audit score</th><th>Opportunity</th><th>Stage</th><th>Signal</th><th>Next action</th><th><span className="sr-only">Open</span></th></tr></thead><tbody>{filtered.map((lead) => (
+            <div className="table-wrap"><table><thead><tr><th className="select-column"><input type="checkbox" aria-label="Select visible prospects" checked={auditableVisible.length > 0 && auditableVisible.every((lead) => selectedLeadIds.includes(lead.id))} onChange={selectVisible} /></th><th>Business</th><th>Industry</th><th>Audit score</th><th>Closing readiness</th><th>Stage</th><th>Signal</th><th>Next action</th><th><span className="sr-only">Open</span></th></tr></thead><tbody>{filtered.map((lead) => (
               <tr key={lead.id} className={lead.id === selectedId ? "selected" : ""} onClick={() => chooseLead(lead)}>
-                <td className="select-column"><input type="checkbox" aria-label={`Select ${lead.agencyName}`} checked={selectedLeadIds.includes(lead.id)} disabled={["Won", "Lost"].includes(lead.status)} onClick={(event) => event.stopPropagation()} onChange={() => toggleLead(lead.id)} /></td><td><div className="agency-cell"><span className="agency-avatar">{initials(lead.agencyName)}</span><span><strong>{lead.agencyName}</strong><small>{lead.contactName || "No contact"}{lead.city ? ` · ${lead.city}${lead.state ? `, ${lead.state}` : ""}` : ""}</small></span></div></td><td><span className="carrier-text">{lead.carrier}</span></td><td>{lead.score ? <span className={`score-badge ${scoreTone(lead.score)}`}><i style={{ "--score": `${lead.score * 3.6}deg` } as React.CSSProperties} />{lead.score}</span> : <span className="not-run">Not run</span>}</td><td>{lead.score ? <span className={`priority-pill priority-${buildOpportunity(lead, []).priorityLabel.toLowerCase().replaceAll(" ", "-")}`}><strong>{buildOpportunity(lead, []).priorityScore}</strong>{buildOpportunity(lead, []).primaryService}</span> : <span className="not-run">Needs audit</span>}</td><td><span className={`stage stage-${lead.status.toLowerCase().replaceAll(" ", "-")}`}>{lead.status}</span></td><td>{lead.reportViews ? <span className="signal"><i /> {lead.reportViews} view{lead.reportViews === 1 ? "" : "s"}</span> : <span className="muted">No activity</span>}</td><td><span className={lead.status === "Follow-up due" ? "due" : "next-action"}>{nextLeadAction(lead)}</span></td><td><button className="row-open" aria-label={`Open ${lead.agencyName}`} onClick={(event) => { event.stopPropagation(); chooseLead(lead); }}>›</button></td>
+                <td className="select-column"><input type="checkbox" aria-label={`Select ${lead.agencyName}`} checked={selectedLeadIds.includes(lead.id)} disabled={["Won", "Lost", "Disqualified"].includes(lead.status)} onClick={(event) => event.stopPropagation()} onChange={() => toggleLead(lead.id)} /></td><td><div className="agency-cell"><span className="agency-avatar">{initials(lead.agencyName)}</span><span><strong>{lead.agencyName}</strong><small>{lead.contactName || "No contact"}{lead.city ? ` · ${lead.city}${lead.state ? `, ${lead.state}` : ""}` : ""}</small></span></div></td><td><span className="carrier-text">{lead.carrier}</span></td><td>{lead.score ? <span className={`score-badge ${scoreTone(lead.score)}`}><i style={{ "--score": `${lead.score * 3.6}deg` } as React.CSSProperties} />{lead.score}</span> : <span className="not-run">Not run</span>}</td><td><span className={`priority-pill priority-${qualificationResultTone(qualificationBreakdown(lead).total)}`}><strong>{qualificationBreakdown(lead).total}</strong>{qualificationLabel(lead)}</span></td><td><span className={`stage stage-${lead.status.toLowerCase().replaceAll(" ", "-")}`}>{lead.status}</span></td><td>{lead.reportViews ? <span className="signal"><i /> {lead.reportViews} view{lead.reportViews === 1 ? "" : "s"}</span> : <span className="muted">No activity</span>}</td><td><span className={lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) <= new Date() ? "due" : "next-action"}>{nextLeadAction(lead)}</span></td><td><button className="row-open" aria-label={`Open ${lead.agencyName}`} onClick={(event) => { event.stopPropagation(); chooseLead(lead); }}>›</button></td>
               </tr>))}</tbody></table>{!filtered.length && <div className="empty-state"><strong>{leads.length ? "No businesses match this view." : "Build your first real prospect list."}</strong><span>{leads.length ? "Try a different search or pipeline stage." : "Import a CSV or add one business, then run a website audit."}</span>{leads.length ? <button className="secondary-button" onClick={() => { setQuery(""); setStatusFilter("All stages"); }}>Reset view</button> : <div className="empty-actions"><button className="secondary-button" onClick={() => setShowImport(true)}>Import CSV</button><button className="primary-button" onClick={() => setShowAdd(true)}>Add business</button></div>}</div>}</div>
-          </section>
+          </section></>}
         </div>
       </section>
+
+      {selected && <ProspectDetail lead={selected} findings={findings} opportunity={opportunity} proposal={proposal} pagesAudited={pagesAudited} activities={activities} busy={busy} onClose={() => setSelectedId(-1)} onAudit={runAudit} onPatch={patchLead} onCopyOutreach={copyOutreach} onOpenGmail={openGmail} onProposal={(createdProposal, updatedLead) => { setProposal(createdProposal); replaceLead(updatedLead); setToast("Trackable proposal created"); }} onRefresh={async () => { await loadDetail(selected.id); setToast("Proposal status refreshed"); }} />}
 
       {selected && <aside className="detail-panel"><div className="detail-top"><p>Prospect detail</p><button aria-label="Close prospect detail" onClick={() => setSelectedId(-1)}>×</button></div><div className="detail-identity"><span className="detail-avatar">{initials(selected.agencyName)}</span><div><h2>{selected.agencyName}</h2><p>{selected.carrier}{selected.city ? ` · ${selected.city}${selected.state ? `, ${selected.state}` : ""}` : ""}</p></div></div><div className="detail-actions three"><button onClick={copyOutreach}>Copy email</button><button className="gmail-button" onClick={openGmail}>Open Gmail</button><a href={`/report/${selected.reportToken}`} target="_blank" rel="noreferrer">Open brief ↗</a></div><p className="workflow-hint">{!selected.score ? "1. Run the audit to create a credible reason to reach out." : !selected.email ? "2. Add an email address before opening Gmail." : "2. Review the email, send it, then schedule a follow-up."}</p>{opportunity && <div className="opportunity-card"><div className="opportunity-head"><span>Sales opportunity</span><strong>{opportunity.priorityScore}<small>/100</small></strong></div><h3>{opportunity.recommendedOffer}</h3><p>{opportunity.expectedOutcome}</p><div className="opportunity-meta"><span>{opportunity.priorityLabel}</span><span>{opportunity.scope}</span>{pagesAudited > 0 && <span>{pagesAudited} pages audited</span>}</div><div className="evidence-callout"><b>Lead with</b><span>{opportunity.primaryFinding}</span></div><div className="next-step"><b>Next action</b><span>{opportunity.nextAction}</span></div></div>}<div className="stage-control"><label htmlFor="lead-stage">Pipeline stage</label><select id="lead-stage" value={selected.status} onChange={(event) => updateStatus(event.target.value as LeadStatus)}>{pipelineStatuses.map((status) => <option key={status}>{status}</option>)}</select></div><div className="audit-summary"><div className="audit-score"><span className={`score-ring ${scoreTone(selected.score)}`}>{selected.score || "—"}</span><span><strong>Digital readiness</strong><small>{selected.lastAuditAt ? `Audited ${friendlyDate(selected.lastAuditAt)}` : "Audit not run"}</small></span></div><div className="score-lines">{[["Visibility", selected.visibilityScore], ["Conversion", selected.conversionScore], ["Technical", selected.technicalScore], ["Trust", selected.trustScore]].map(([label, value]) => <div key={label}><span>{label}</span><i><b style={{ width: `${value}%` }} /></i><strong>{value || "—"}</strong></div>)}</div><button className="audit-button" disabled={busy} onClick={runAudit}>{busy ? "Auditing up to 5 pages…" : selected.score ? "Run fresh multi-page audit" : "Run multi-page website audit"}</button><p className="audit-note">Reviews up to five public pages and records exact evidence. Check findings before outreach.</p></div>{findings.length > 0 && <div className="findings-preview"><h3>Best evidence</h3>{findings.slice(0, 3).map((finding) => <article key={`${finding.title}-${finding.sortOrder}`}><span className={`finding-dot ${finding.severity.toLowerCase()}`} /> <div><strong>{finding.title}</strong><p>{finding.evidence}</p></div></article>)}</div>}<div className="contact-block"><h3>Contact & industry</h3><div className="contact-edit"><input aria-label="Contact name" placeholder="Contact name" value={contactDraft.contactName} onChange={(event) => setContactDraft({ ...contactDraft, contactName: event.target.value })} /><input aria-label="Email" type="email" placeholder="Email" value={contactDraft.email} onChange={(event) => setContactDraft({ ...contactDraft, email: event.target.value })} /><input aria-label="Phone" placeholder="Phone" value={contactDraft.phone} onChange={(event) => setContactDraft({ ...contactDraft, phone: event.target.value })} /><input aria-label="Industry" placeholder="Industry" value={contactDraft.carrier} onChange={(event) => setContactDraft({ ...contactDraft, carrier: event.target.value })} /><button disabled={busy} onClick={() => patchLead(contactDraft, "Contact details saved")}>Save contact</button></div><a className="website-link" href={selected.website} target="_blank" rel="noreferrer">{selected.website.replace(/^https?:\/\//, "")} ↗</a></div><div className="workflow-block"><h3>Next follow-up</h3><div className="inline-save"><input type="datetime-local" value={followUp} onChange={(event) => setFollowUp(event.target.value)} /><button disabled={busy} onClick={() => patchLead({ nextFollowUpAt: followUp ? new Date(followUp).toISOString() : null }, "Follow-up saved")}>Save</button></div></div><div className="workflow-block"><h3>Sales notes</h3><textarea rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Decision maker, pain points, objections, next step…" /><button className="save-notes" disabled={busy || notes === selected.notes} onClick={() => patchLead({ notes }, "Notes saved")}>Save notes</button></div><div className="activity-block"><div className="section-title"><h3>Recent activity</h3></div>{activities.length ? <ol className="timeline">{activities.slice(0, 8).map((activity, index) => <li className={index === 0 ? "hot" : ""} key={activity.id}><i /><div><strong>{activity.description}</strong><span>{friendlyDate(activity.createdAt)}</span></div></li>)}</ol> : <p className="activity-empty">No activity yet. Run the audit to start.</p>}</div></aside>}
 

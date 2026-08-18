@@ -44,6 +44,7 @@ export async function POST(request: Request) {
         email,
         phone: String(row.phone ?? "").trim(),
         notes: String(row.notes ?? "").trim(),
+        status: "Identified",
         reportToken: makeToken(),
       }).returning();
       await db.insert(activities).values({ leadId: lead.id, activityType: "lead_imported", description: "Business imported from CSV" });

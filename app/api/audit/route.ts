@@ -87,7 +87,7 @@ export async function POST(request: Request) {
       conversionScore: result.conversion,
       technicalScore: result.technical,
       trustScore: result.trust,
-      status: "Audit ready",
+      status: "Audited",
       lastAuditAt: sql`CURRENT_TIMESTAMP`,
       updatedAt: sql`CURRENT_TIMESTAMP`,
     }).where(eq(leads.id, leadId)).returning();

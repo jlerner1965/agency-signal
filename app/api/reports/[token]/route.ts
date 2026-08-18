@@ -19,7 +19,7 @@ export async function GET(
         .update(leads)
         .set({
           reportViews: sql`${leads.reportViews} + 1`,
-          status: "Report viewed",
+          status: report.lead.status === "Audited" ? "Contacted" : report.lead.status,
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })
         .where(eq(leads.id, report.lead.id)),

@@ -1,12 +1,16 @@
 export type LeadStatus =
-  | "New"
-  | "Audit ready"
+  | "Identified"
+  | "Audited"
   | "Contacted"
-  | "Report viewed"
-  | "Follow-up due"
-  | "Meeting booked"
+  | "Replied"
+  | "Discovery scheduled"
+  | "Qualified"
+  | "Proposal sent"
+  | "Decision pending"
   | "Won"
-  | "Lost";
+  | "Lost"
+  | "Nurture"
+  | "Disqualified";
 
 export type Lead = {
   id: number;
@@ -31,6 +35,24 @@ export type Lead = {
   lastAuditAt: string | null;
   reportViews: number;
   reportToken: string;
+  fitScore: number;
+  needScore: number;
+  intentScore: number;
+  urgencyScore: number;
+  reachabilityScore: number;
+  qualificationStatus: string;
+  businessObjective: string;
+  painPoint: string;
+  currentProvider: string;
+  decisionMaker: string;
+  budgetRange: string;
+  desiredTimeline: string;
+  nextCommittedStep: string;
+  objection: string;
+  lossReason: string;
+  dealValue: number;
+  sequenceStatus: string;
+  sequenceStep: number;
   notes: string;
 };
 
@@ -63,6 +85,28 @@ export type Opportunity = {
   primaryFinding: string;
   outreachAngle: string;
   nextAction: string;
+};
+
+export type Proposal = {
+  id: number;
+  leadId: number;
+  token: string;
+  offerId: string;
+  title: string;
+  service: string;
+  outcome: string;
+  scope: string;
+  deliverables: string;
+  price: number;
+  timeline: string;
+  status: string;
+  viewCount: number;
+  expiresAt: string;
+  acceptedAt: string | null;
+  signerName: string;
+  signerEmail: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type PublicReportLead = Pick<

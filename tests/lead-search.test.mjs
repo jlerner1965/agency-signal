@@ -4,30 +4,30 @@ import { buildDailyQueue, filterLeadRows, matchesLeadSearch, nextLeadAction } fr
 
 const leads = [
   {
-    agencyName: "Front Range Insurance",
+    agencyName: "Front Range Services",
     contactName: "Sarah Mitchell",
-    carrier: "State Farm",
+    carrier: "Home services",
     city: "Fort Collins",
     state: "CO",
     website: "https://frontrange.example.com",
     email: "sarah@frontrange.example.com",
     phone: "+1 (970) 555-0100",
-    status: "Audit ready",
+    status: "Audited",
     notes: "Interested in local visibility",
     score: 58,
     reportViews: 0,
     nextFollowUpAt: null,
   },
   {
-    agencyName: "Summit Coverage",
+    agencyName: "Summit Dental",
     contactName: "Marcus Reed",
-    carrier: "Independent",
+    carrier: "Dental",
     city: "Denver",
     state: "CO",
     website: "https://summit.example.com",
     email: "marcus@summit.example.com",
     phone: "+1 (303) 555-0199",
-    status: "Meeting booked",
+    status: "Discovery scheduled",
     notes: "Requested implementation quote",
     score: 74,
     reportViews: 3,
@@ -43,7 +43,7 @@ test("searches names and locations with multiple words", () => {
 test("searches contact fields, website, status, and notes", () => {
   assert.equal(matchesLeadSearch(leads[1], "303 555 0199"), true);
   assert.equal(matchesLeadSearch(leads[1], "summit.example"), true);
-  assert.equal(matchesLeadSearch(leads[1], "meeting quote"), true);
+  assert.equal(matchesLeadSearch(leads[1], "discovery quote"), true);
 });
 
 test("global search overrides section and stage filters", () => {
@@ -52,13 +52,13 @@ test("global search overrides section and stage filters", () => {
     statusFilter: "Lost",
     query: "Marcus",
   });
-  assert.deepEqual(rows.map((lead) => lead.agencyName), ["Summit Coverage"]);
+  assert.deepEqual(rows.map((lead) => lead.agencyName), ["Summit Dental"]);
 });
 
-test("daily queue prioritizes due follow-ups, engagement, and audit-ready leads", () => {
+test("daily queue prioritizes due follow-ups, engagement, and audited leads", () => {
   const queue = buildDailyQueue([
     { ...leads[0], agencyName: "Audit Ready" },
-    { ...leads[1], agencyName: "Warm Report", status: "Report viewed", nextFollowUpAt: null },
+    { ...leads[1], agencyName: "Warm Report", status: "Contacted", nextFollowUpAt: null },
     { ...leads[0], agencyName: "Due Now", status: "Contacted", nextFollowUpAt: "2026-08-17T12:00:00Z" },
     { ...leads[0], agencyName: "Closed", status: "Won" },
   ], new Date("2026-08-18T12:00:00Z"));

@@ -15,6 +15,20 @@
       "when": 1787064405074,
       "tag": "0001_nervous_fat_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787067226370,
+      "tag": "0002_happy_zodiak",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787067248321,
+      "tag": "0003_lush_blue_blade",
+      "breakpoints": true
     }
   ]
 }
