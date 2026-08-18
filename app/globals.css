@@ -400,6 +400,15 @@ td { height: 70px; font-size: 12px; }
 .guided-actions { display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; margin-top: 12px; }
 .guided-actions button { margin: 0; }
 .guided-actions button.secondary { border: 1px solid #cbd6e1; background: white; color: #334a62; }
+.advanced-closing { margin-top: 16px; border: 1px solid #dfe5ea; border-radius: 9px; background: #fafbfc; }
+.advanced-closing summary { min-height: 58px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; color: #344054; cursor: pointer; list-style: none; }
+.advanced-closing summary::-webkit-details-marker { display: none; }
+.advanced-closing summary::after { content: "+"; width: 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; background: #edf1f4; color: #667085; font-size: 18px; }
+.advanced-closing[open] summary::after { content: "−"; }
+.advanced-closing summary span, .advanced-closing summary small { display: block; }
+.advanced-closing summary span { font-size: 13px; font-weight: 800; }
+.advanced-closing summary small { margin-left: auto; color: #8994a2; font-size: 10px; }
+.advanced-closing-body { padding: 0 16px 20px; border-top: 1px solid #e5e9ed; }
 
 .copilot-card { margin-top: 18px; padding: 20px; }
 .copilot-heading > div > span { width: 34px; height: 34px; font-size: 16px; }
