@@ -44,3 +44,6 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+
+# typescript incremental build cache
+tsconfig.tsbuildinfo

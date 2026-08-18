@@ -1,0 +1,18 @@
+{
+  "lighthouseResult": {
+    "categories": {
+      "performance": { "score": 0.96 },
+      "accessibility": { "score": 0.94 },
+      "seo": { "score": 1 },
+      "best-practices": { "score": 0.96 }
+    },
+    "audits": {
+      "largest-contentful-paint": { "numericValue": 1600, "displayValue": "1.6 s" },
+      "cumulative-layout-shift": { "numericValue": 0.02 },
+      "total-blocking-time": { "numericValue": 40 },
+      "total-byte-weight": { "numericValue": 900000 },
+      "modern-image-formats": { "numericValue": 0 },
+      "render-blocking-resources": { "numericValue": 0 }
+    }
+  }
+}
