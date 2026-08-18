@@ -109,6 +109,30 @@ export type Proposal = {
   updatedAt: string;
 };
 
+export type CopilotAction = "brief" | "next_action" | "message" | "discovery" | "proposal";
+
+export type CopilotEvidence = {
+  id: string;
+  source: string;
+  label: string;
+  value: string;
+};
+
+export type CopilotResult = {
+  runId: number;
+  action: CopilotAction;
+  title: string;
+  summary: string;
+  recommendedAction: string;
+  rationale: string;
+  subject: string;
+  content: string;
+  confidence: "High" | "Medium" | "Low";
+  evidence: CopilotEvidence[];
+  missingInformation: string[];
+  suggestedFields: Pick<Lead, "businessObjective" | "painPoint" | "currentProvider" | "decisionMaker" | "budgetRange" | "desiredTimeline" | "nextCommittedStep" | "objection">;
+};
+
 export type PublicReportLead = Pick<
   Lead,
   | "agencyName"

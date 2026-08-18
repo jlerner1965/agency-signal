@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Activity, Finding, Lead, LeadStatus, Opportunity, Proposal } from "@/lib/types";
+import type { Activity, CopilotAction, CopilotResult, Finding, Lead, LeadStatus, Opportunity, Proposal } from "@/lib/types";
 import { discoveryPlaybook, objections, offerCatalog, offerForOpportunity, outreachSequence, qualificationBreakdown, qualificationLabel, salesStages } from "@/lib/sales";
 
 type Props = {
@@ -26,6 +26,14 @@ function scoreTone(score: number) { return score === 0 ? "neutral" : score < 55 
 function friendlyDate(value: string | null) { return value ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value)) : "Not scheduled"; }
 function inputDate(value: string | null) { if (!value) return ""; const date = new Date(value); const offset = date.getTimezoneOffset() * 60_000; return new Date(date.getTime() - offset).toISOString().slice(0, 16); }
 
+const copilotOptions: { action: CopilotAction; label: string; hint: string }[] = [
+  { action: "brief", label: "Sales brief", hint: "Prepare for the call" },
+  { action: "next_action", label: "Next action", hint: "Choose the best move" },
+  { action: "message", label: "Personalized email", hint: "Draft outreach or follow-up" },
+  { action: "discovery", label: "Discovery analysis", hint: "Find gaps and suggestions" },
+  { action: "proposal", label: "Proposal narrative", hint: "Connect evidence to value" },
+];
+
 export default function ProspectDetail(props: Props) {
   const { lead, findings, opportunity, proposal, pagesAudited, activities, busy } = props;
   const [tab, setTab] = useState<"close" | "audit" | "activity">("close");
@@ -39,6 +47,12 @@ export default function ProspectDetail(props: Props) {
   const [offerId, setOfferId] = useState(recommendedOffer.id);
   const [proposalPrice, setProposalPrice] = useState(recommendedOffer.price);
   const [proposalTimeline, setProposalTimeline] = useState(recommendedOffer.timeline);
+  const [copilotContext, setCopilotContext] = useState("");
+  const [copilotBusy, setCopilotBusy] = useState<CopilotAction | null>(null);
+  const [copilotResult, setCopilotResult] = useState<CopilotResult | null>(null);
+  const [copilotContent, setCopilotContent] = useState("");
+  const [copilotState, setCopilotState] = useState<"Draft" | "Approved" | "Discarded">("Draft");
+  const [copilotError, setCopilotError] = useState("");
 
   if (draftLeadId !== lead.id) {
     setDraftLeadId(lead.id);
@@ -47,6 +61,7 @@ export default function ProspectDetail(props: Props) {
     setContact({ contactName: lead.contactName, email: lead.email, phone: lead.phone, carrier: lead.carrier });
     setNotes(lead.notes); setFollowUp(inputDate(lead.nextFollowUpAt)); setTab("close");
     setOfferId(recommendedOffer.id); setProposalPrice(recommendedOffer.price); setProposalTimeline(recommendedOffer.timeline);
+    setCopilotContext(""); setCopilotBusy(null); setCopilotResult(null); setCopilotContent(""); setCopilotState("Draft"); setCopilotError("");
   }
 
   const scoredLead = { ...lead, ...qualification };
@@ -70,6 +85,35 @@ export default function ProspectDetail(props: Props) {
 
   async function copyObjectionResponse() { if (objectionResponse) await navigator.clipboard.writeText(objectionResponse); }
 
+  async function generateCopilot(action: CopilotAction) {
+    setCopilotBusy(action); setCopilotError(""); setCopilotState("Draft");
+    try {
+      const response = await fetch(`/api/leads/${lead.id}/copilot`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, additionalContext: copilotContext }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to generate copilot result");
+      setCopilotResult(payload.result); setCopilotContent(payload.result.content || payload.result.summary || "");
+    } catch (error) {
+      setCopilotError(error instanceof Error ? error.message : "Unable to generate copilot result");
+    } finally { setCopilotBusy(null); }
+  }
+
+  async function reviewCopilot(status: "Approved" | "Discarded") {
+    if (!copilotResult) return;
+    const response = await fetch(`/api/leads/${lead.id}/copilot`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: copilotResult.runId, status }) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Unable to update draft");
+    setCopilotState(status);
+    if (status === "Discarded") { setCopilotResult(null); setCopilotContent(""); }
+  }
+
+  async function applySuggestedFields() {
+    if (!copilotResult) return;
+    const suggestions = Object.fromEntries(Object.entries(copilotResult.suggestedFields).filter(([, value]) => value.trim()));
+    if (!Object.keys(suggestions).length) return;
+    setDiscovery((current) => ({ ...current, ...suggestions }));
+    await props.onPatch(suggestions, "Human-reviewed AI suggestions applied to discovery");
+  }
+
   return <aside className="detail-panel conversion-panel">
     <div className="detail-top"><p>Conversion workspace</p><button aria-label="Close prospect detail" onClick={props.onClose}>×</button></div>
     <div className="detail-identity"><span className="detail-avatar">{initials(lead.agencyName)}</span><div><h2>{lead.agencyName}</h2><p>{lead.carrier}{lead.city ? ` · ${lead.city}${lead.state ? `, ${lead.state}` : ""}` : ""}</p></div></div>
@@ -77,6 +121,24 @@ export default function ProspectDetail(props: Props) {
 
     {tab === "close" && <>
       <div className="close-score-card"><div><span>Closing readiness</span><strong>{qualificationResult.total}<small>/100</small></strong></div><div className="readiness-bar"><i style={{ width: `${qualificationResult.total}%` }} /></div><p>{qualificationLabel(scoredLead)} · Need and audit quality are separate from buyer intent.</p></div>
+      <section className="copilot-card" aria-labelledby="copilot-title">
+        <div className="copilot-heading"><div><span aria-hidden="true">✦</span><div><h3 id="copilot-title">AI Sales Copilot</h3><p>Grounded in this prospect’s saved evidence</p></div></div><small>Human approval required</small></div>
+        <div className="copilot-actions">{copilotOptions.map((option) => <button key={option.action} disabled={Boolean(copilotBusy)} onClick={() => generateCopilot(option.action)}><strong>{copilotBusy === option.action ? "Working…" : option.label}</strong><span>{option.hint}</span></button>)}</div>
+        <label className="copilot-context">Optional direction<textarea rows={2} maxLength={1200} value={copilotContext} onChange={(event) => setCopilotContext(event.target.value)} placeholder="Example: This is a follow-up after Tuesday’s call. Keep the tone direct." /></label>
+        {copilotError && <div className="copilot-error" role="alert"><strong>Copilot needs attention</strong><p>{copilotError}</p></div>}
+        {copilotResult && <div className="copilot-result">
+          <div className="copilot-result-head"><div><span className={`confidence ${copilotResult.confidence.toLowerCase()}`}>{copilotResult.confidence} confidence</span><h4>{copilotResult.title}</h4></div><small>{copilotState}</small></div>
+          <p className="copilot-summary">{copilotResult.summary}</p>
+          <div className="copilot-recommendation"><b>Recommended next action</b><p>{copilotResult.recommendedAction}</p><span>{copilotResult.rationale}</span></div>
+          {copilotResult.subject && <label className="copilot-subject">Subject<input value={copilotResult.subject} readOnly /></label>}
+          <label className="copilot-output">Editable draft<textarea rows={8} value={copilotContent} onChange={(event) => setCopilotContent(event.target.value)} /></label>
+          <div className="copilot-evidence"><b>Evidence used</b>{copilotResult.evidence.length ? <ul>{copilotResult.evidence.map((item) => <li key={item.id}><span>{item.id} · {item.source}</span><strong>{item.label}</strong><p>{item.value}</p></li>)}</ul> : <p>No saved evidence cited. Treat this output as low confidence.</p>}</div>
+          {copilotResult.missingInformation.length > 0 && <div className="copilot-missing"><b>Missing before you act</b><ul>{copilotResult.missingInformation.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+          {copilotResult.action === "discovery" && Object.values(copilotResult.suggestedFields).some(Boolean) && <button className="apply-suggestions" onClick={() => applySuggestedFields().catch((error) => setCopilotError(error.message))}>Review and apply suggested discovery fields</button>}
+          <div className="copilot-review-actions"><button onClick={() => navigator.clipboard.writeText(`${copilotResult.subject ? `Subject: ${copilotResult.subject}\n\n` : ""}${copilotContent}`)}>Copy draft</button><button className="approve" disabled={copilotState === "Approved"} onClick={() => reviewCopilot("Approved").catch((error) => setCopilotError(error.message))}>{copilotState === "Approved" ? "Approved" : "Approve draft"}</button><button className="discard" onClick={() => reviewCopilot("Discarded").catch((error) => setCopilotError(error.message))}>Discard</button></div>
+          <p className="copilot-safety">AI does not send messages, change stages, set pricing, or edit records without your click.</p>
+        </div>}
+      </section>
       <div className="stage-control"><label htmlFor="lead-stage">Sales stage</label><select id="lead-stage" value={lead.status} onChange={(event) => props.onPatch({ status: event.target.value as LeadStatus }, `Moved to ${event.target.value}`)}>{salesStages.map((status) => <option key={status}>{status}</option>)}</select></div>
       <section className="conversion-section"><div className="conversion-title"><div><span>01</span><h3>Qualification</h3></div><small>Fit · need · intent · urgency · reachability</small></div><div className="qualification-grid">{([['fitScore','Fit'],['needScore','Need'],['intentScore','Intent'],['urgencyScore','Urgency'],['reachabilityScore','Reachability']] as const).map(([field, label]) => <label key={field}>{label}<select value={qualification[field]} onChange={(event) => setQualification({ ...qualification, [field]: Number(event.target.value) })}>{[0,25,50,75,100].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>)}</div><button className="section-save" disabled={busy} onClick={() => props.onPatch(qualification, `Qualification saved · ${qualificationLabel(scoredLead)}`)}>Save qualification</button></section>
       <section className="conversion-section"><div className="conversion-title"><div><span>02</span><h3>Discovery record</h3></div><small>Required before a proposal</small></div><div className="discovery-grid"><label>Business objective<textarea rows={2} value={discovery.businessObjective} onChange={(event) => setDiscovery({ ...discovery, businessObjective: event.target.value })} /></label><label>Main pain point<textarea rows={2} value={discovery.painPoint} onChange={(event) => setDiscovery({ ...discovery, painPoint: event.target.value })} /></label><label>Current provider<input value={discovery.currentProvider} onChange={(event) => setDiscovery({ ...discovery, currentProvider: event.target.value })} /></label><label>Decision-maker<input value={discovery.decisionMaker} onChange={(event) => setDiscovery({ ...discovery, decisionMaker: event.target.value })} /></label><label>Budget range<select value={discovery.budgetRange} onChange={(event) => setDiscovery({ ...discovery, budgetRange: event.target.value })}><option value="">Unknown</option><option>$1k–$3k</option><option>$3k–$7.5k</option><option>$7.5k–$15k</option><option>$15k+</option></select></label><label>Desired timeline<select value={discovery.desiredTimeline} onChange={(event) => setDiscovery({ ...discovery, desiredTimeline: event.target.value })}><option value="">Unknown</option><option>Within 30 days</option><option>1–3 months</option><option>3–6 months</option><option>Later / nurture</option></select></label><label className="span-two">Next committed step<input value={discovery.nextCommittedStep} placeholder="Specific action, owner, and date" onChange={(event) => setDiscovery({ ...discovery, nextCommittedStep: event.target.value })} /></label></div><button className="section-save" disabled={busy} onClick={() => props.onPatch(discovery, "Discovery record saved")}>Save discovery</button></section>

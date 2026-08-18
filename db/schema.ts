@@ -111,3 +111,14 @@ export const proposals = sqliteTable("proposals", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const aiRuns = sqliteTable("ai_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  leadId: integer("lead_id").notNull(),
+  action: text("action").notNull(),
+  model: text("model").notNull(),
+  status: text("status").notNull().default("Draft"),
+  result: text("result").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

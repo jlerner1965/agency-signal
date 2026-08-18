@@ -1,5 +1,13 @@
 # AgencySignal
 
+AgencySignal finds evidence-backed opportunities on business websites and gives a seller a structured workflow to qualify, follow up, propose, and close them.
+
+## AI Sales Copilot
+
+The Close workspace includes five human-reviewed AI actions: sales brief, next action, personalized email, discovery analysis, and proposal narrative. Each result shows the exact saved CRM or audit evidence it used, its confidence, and missing information. AI drafts never send messages, change stages, set prices, or edit records automatically.
+
+Set `OPENAI_API_KEY` as a secret production environment variable to enable generation. `OPENAI_MODEL` is optional and defaults to `gpt-5.4-nano`. API responses use a strict JSON schema and are stored with Draft, Approved, or Discarded status for review history.
+
 AgencySignal is an evidence-led audit-to-sale workspace for growing businesses. It combines prospect imports, public-homepage auditing, shareable opportunity briefs, engagement signals, personalized Gmail outreach, and follow-up management in one focused application.
 
 ## Features
