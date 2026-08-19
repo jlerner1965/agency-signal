@@ -49,6 +49,12 @@ npm run db:migrate:remote                     # schema first, or the Worker 500s
 npm run deploy
 ```
 
+`npm run deploy` and `npm run db:migrate:remote` deliberately do **not** run
+through `scripts/sites-env.sh`, unlike every other command here. That helper
+redirects `XDG_CONFIG_HOME` into `.sites-runtime`, which is where Wrangler keeps
+its OAuth token — routing them through it would hide a perfectly good
+`wrangler login` and report you as unauthenticated on every deploy.
+
 Then set the secrets. They are per-Worker, so this can only happen after the
 first deploy has created it:
 
