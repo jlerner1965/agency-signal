@@ -39,6 +39,41 @@ payment method, so the first deploy needs neither.
 
 ### Deploying to Cloudflare
 
+Two commands.
+
+```bash
+npx wrangler login          # once, opens a browser
+npm run setup:cloudflare
+```
+
+`setup:cloudflare` finds or creates the D1 database, builds, applies the
+migrations, generates a dashboard login if there is not one already, deploys,
+and uploads the secrets as part of that deploy. It prints the site URL and, on a
+first run, the generated password.
+
+It is safe to re-run. The database is reused rather than recreated, migrations
+are tracked by tag, and an existing login in `.dev.vars` is kept — a second run
+will not silently rotate your password and sign you out.
+
+```
+--email=you@example.com   used when generating a first login; prompts when a terminal is attached
+--name=my-worker          Worker and database name, default agency-signal
+--r2=my-bucket            attach an R2 bucket; omitted entirely by default
+--skip-build              reuse the existing dist/ instead of rebuilding
+```
+
+The audit keys are not part of it, because a deploy without them still works:
+
+```bash
+npx wrangler secret put PAGESPEED_API_KEY     --name agency-signal
+npx wrangler secret put GOOGLE_PLACES_API_KEY --name agency-signal
+```
+
+### Doing it by hand
+
+The same sequence, if you want to run the pieces yourself or something in the
+middle failed:
+
 ```bash
 npx wrangler login
 npx wrangler d1 create agency-signal          # prints database_id
@@ -49,28 +84,28 @@ npm run db:migrate:remote                     # schema first, or the Worker 500s
 npm run deploy
 ```
 
+Then the secrets, which are per-Worker and so can only be set once that first
+deploy has created it:
+
+```bash
+npx wrangler secret put AGENCYSIGNAL_LOGIN_EMAIL    --name agency-signal
+npx wrangler secret put AGENCYSIGNAL_PASSWORD_SALT  --name agency-signal
+npx wrangler secret put AGENCYSIGNAL_PASSWORD_HASH  --name agency-signal
+npx wrangler secret put AGENCYSIGNAL_SESSION_SECRET --name agency-signal
+```
+
+**Between that deploy and the last of those, every request returns 401.** That is
+the intended failure: `app/dashboard-auth.ts` has no credentials to compare
+against, so it refuses everyone rather than admitting anyone. Secrets take effect
+without a redeploy, so the app starts working as soon as the fourth one lands.
+`npm run setup:cloudflare` avoids the window entirely by uploading the secrets
+with the deploy.
+
 `npm run deploy` and `npm run db:migrate:remote` deliberately do **not** run
 through `scripts/sites-env.sh`, unlike every other command here. That helper
 redirects `XDG_CONFIG_HOME` into `.sites-runtime`, which is where Wrangler keeps
 its OAuth token — routing them through it would hide a perfectly good
 `wrangler login` and report you as unauthenticated on every deploy.
-
-Then set the secrets. They are per-Worker, so this can only happen after the
-first deploy has created it:
-
-```bash
-npx wrangler secret put AGENCYSIGNAL_LOGIN_EMAIL   --name agency-signal
-npx wrangler secret put AGENCYSIGNAL_PASSWORD_SALT --name agency-signal
-npx wrangler secret put AGENCYSIGNAL_PASSWORD_HASH --name agency-signal
-npx wrangler secret put AGENCYSIGNAL_SESSION_SECRET --name agency-signal
-npx wrangler secret put PAGESPEED_API_KEY          --name agency-signal
-npx wrangler secret put GOOGLE_PLACES_API_KEY      --name agency-signal
-```
-
-**Between the deploy and the last of those, every request returns 401.** That is
-the intended failure: `app/dashboard-auth.ts` has no credentials to compare
-against, so it refuses everyone rather than admitting anyone. Secrets take effect
-without a redeploy, so the app starts working as soon as the fourth one lands.
 
 ### What the deploy script does
 
