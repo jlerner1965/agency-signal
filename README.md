@@ -109,8 +109,10 @@ run covers, and the run says which checks it could not measure and why.
 
 ## Local development
 
-Requirements: Node.js 22.13 or newer, npm, and a Linux environment with `flock`,
-`curl`, and GNU `timeout`.
+Requirements: Node.js 22.13 or newer, npm, `curl`, and a Unix shell. Linux uses
+`flock`, `sha256sum` and GNU `timeout` directly; macOS falls back to a `mkdir`
+lock, `shasum`, and an unbounded run, so no Homebrew packages are needed.
+Windows needs WSL.
 
 ```bash
 npm run setup     # dependencies, a login, both API keys, and the database

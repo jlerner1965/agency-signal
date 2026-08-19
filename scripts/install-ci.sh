@@ -7,22 +7,19 @@ if [[ "${SITES_ENV_READY:-}" != "1" ]]; then
   exec "${script_dir}/sites-env.sh" -- "$0" "$@"
 fi
 
-command -v flock || {
-  echo "install-ci.sh requires Linux flock." >&2
-  exit 69
-}
-command -v timeout || {
-  echo "install-ci.sh requires GNU timeout." >&2
-  exit 69
-}
+# shellcheck source=scripts/portable-tools.sh
+. "${script_dir}/portable-tools.sh"
+
 command -v curl || {
   echo "install-ci.sh requires curl for the locked-tarball preflight." >&2
   exit 69
 }
-command -v sha256sum || {
-  echo "install-ci.sh requires sha256sum for cache and install verification." >&2
+command -v awk || {
+  echo "install-ci.sh requires awk." >&2
   exit 69
 }
+# flock, GNU timeout and sha256sum are resolved through portable-tools.sh, which
+# falls back to a mkdir lock, an unbounded run, and shasum on macOS.
 
 runtime_root="${SITES_PROJECT_ROOT}/.sites-runtime"
 expected_home="${runtime_root}/home"
@@ -43,15 +40,15 @@ rm -f "${HOME}/.sites-write-test" "${expected_cache}/.sites-write-test"
 echo "[sites] environment passed: HOME=${HOME}, cache=${expected_cache}"
 
 lock_file="${runtime_root}/install.lock"
-exec 9>"${lock_file}"
-if ! flock -n 9; then
+if ! sites_acquire_lock "${lock_file}"; then
   echo "Another dependency install is already running for ${SITES_PROJECT_ROOT}." >&2
   exit 75
 fi
 
 # Catch an installer started outside this helper. Linux exposes both its command
 # line and working directory through /proc, so avoid broad process-name matches.
-for process in /proc/[0-9]*; do
+# Platforms without /proc — macOS among them — simply skip this check.
+for process in $([ -d /proc ] && echo /proc/[0-9]* || true); do
   pid="${process##*/}"
   [[ "${pid}" != "$$" && "${pid}" != "${PPID}" ]] || continue
   process_cwd="$(readlink -f "${process}/cwd" || true)"
@@ -63,7 +60,7 @@ for process in /proc/[0-9]*; do
   fi
 done
 
-lockfile_sha256="$(sha256sum "${SITES_PROJECT_ROOT}/package-lock.json" | awk '{print $1}')"
+lockfile_sha256="$(sites_sha256 "${SITES_PROJECT_ROOT}/package-lock.json")"
 use_seeded_cache=0
 seed_cache="${SITES_NPM_CACHE_SEED:-}"
 if [[ -n "${seed_cache}" && -d "${seed_cache}" ]]; then
@@ -93,7 +90,11 @@ NODE
   echo "Could not read the integrity-pinned vinext tarball from package-lock.json." >&2
   exit 65
 }
-mapfile -t locked_vinext <<<"${locked_vinext_output}"
+# Not mapfile: macOS still ships bash 3.2, which does not have it.
+locked_vinext=()
+while IFS= read -r locked_line; do
+  locked_vinext+=("${locked_line}")
+done <<<"${locked_vinext_output}"
 if [[ "${#locked_vinext[@]}" -ne 2 ]]; then
   echo "Expected exactly one Vinext URL and integrity value from package-lock.json." >&2
   exit 65
@@ -162,10 +163,9 @@ npm_ci_args=(ci --cache "${expected_cache}")
 if [[ "${use_seeded_cache}" == "1" ]]; then
   npm_ci_args+=(--prefer-offline)
 fi
-timeout \
-  --signal=TERM \
-  --kill-after="${SITES_INSTALL_KILL_AFTER:-15s}" \
+sites_run_bounded \
   "${SITES_INSTALL_TIMEOUT:-8m}" \
+  "${SITES_INSTALL_KILL_AFTER:-15s}" \
   npm "${npm_ci_args[@]}"
 
 vinext="${SITES_PROJECT_ROOT}/node_modules/.bin/vinext"
