@@ -89,7 +89,8 @@ Only a genuinely scored run may write the prospect's headline score.
 | Per-call cost estimates | `lib/audit/cost-config.js` |
 | Which modules run and what keys they want | `lib/audit/registry.js` |
 | Findings → service menu mapping, and the evidence gate | `lib/audit/recommendations.js` |
-| Proposal tiers and the service menu | `config/pricing.json` |
+| Deliverables, severity bands, minimum engagement, retainer | `config/pricing.json` |
+| Band selection and the figure-tracing check | `lib/audit/pricing.js` |
 | Proposal opening voice, and the rules enforced against it | `config/voice.md`, `lib/audit/proposal-voice.js` |
 | Brand token extraction | `lib/audit/brand.js` |
 | Mockup templates | `lib/audit/mockup.js` |
@@ -138,6 +139,34 @@ records itself as `composed` rather than `model`. Technical terms are translated
 into consequences at the point of use, so the reader never has to look anything
 up.
 
+## Pricing
+
+`config/pricing.json` prices deliverables, not packages. Each deliverable
+declares what triggers it (`technical_audit`, `service_line_coverage`,
+`google_presence`, mapped to audit modules in `lib/audit/pricing.js`) and
+carries severity bands with a `min` and `max`. The engine selects exactly one
+band per triggered deliverable:
+
+- **Website rebuild** is claimed only on breadth — four or more high-severity
+  technical findings across two or more areas. Its band comes from the page
+  count, preferring the site's own sitemap over a crawl that may have been
+  capped. Below that threshold the same findings are a **technical fix pass**,
+  light for one root cause and standard for failures spread across templates.
+- **Service pages** are priced per page, and the quantity is the count of
+  services the site sells with no page of their own.
+- **Google deliverables** are skipped entirely when the profile could not be
+  read, so a failed Places lookup is never priced as work.
+- The **retainer** is offered alongside the work and never folded into its
+  total. Its band steps up when there are service lines still needing content.
+
+The file's own comment says the generator "must never emit a figure absent from
+this file". `verifyFigures` enforces it: every band figure must exist in the
+file, every line total must be its band times its counted quantity, and the
+total must be either the sum of the lines shown or the file's own
+`minimum_engagement`. A proposal that fails that check throws rather than
+rendering. `display_mode` controls presentation only — the shipped file asks for
+`starts_at`, which prints the band minimum.
+
 ## Known limitations
 
 - **Blocking rate is unmeasured.** The crawler was never run against real
@@ -147,6 +176,9 @@ up.
   first five real audits will.
 - **The confidence threshold is not calibrated.** 60% is a placeholder. It has
   only ever been exercised with PageSpeed absent. Re-tune it against real runs.
+- **Pricing has never been applied to a real prospect.** The band selection is
+  covered by fixture tests, but the only live proposals were against pypi.org,
+  which triggers one deliverable and no Google or service-line work.
 - **Scores have never been produced against a real prospect.** Every live run in
   development was against pypi.org, which is not a service business and correctly
   yields zero service lines.

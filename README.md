@@ -27,6 +27,11 @@ evidence, and is weighted accordingly.
 
 Every artifact is a draft. Nothing in this system sends anything to a prospect.
 
+Pricing is deliverable-based. The audit decides which deliverables are triggered
+and which severity band each falls in; no figure reaches a proposal that is not
+in `config/pricing.json`, and the only arithmetic performed is a per-unit band
+times a counted quantity, then a sum.
+
 ### What a run produces
 
 - A **score out of 100**, but only when enough of the rubric could actually be
@@ -49,8 +54,8 @@ Every artifact is a draft. Nothing in this system sends anything to a prospect.
 | `lib/audit/scoring-config.js` | Category weights, the confidence threshold below which no score is reported, severity-to-impact defaults, and the retry policy. |
 | `lib/audit/cost-config.js` | Estimated per-call costs, used for reporting what a run cost. |
 | `lib/audit/registry.js` | Which modules run, in what order, and which API keys each one wants. |
-| `config/pricing.json` | Proposal tiers and the service menu. **Ships with placeholders** — a proposal is not exportable until `placeholder` is set to `false`. |
-| `config/voice.md` | The voice the proposal's opening is written in. **Ships as a placeholder** — until it is replaced, that section renders as a visible stub. |
+| `config/pricing.json` | Deliverables, their severity bands, the hourly rate, the minimum engagement, and the retainer. `display_mode` decides whether a figure prints as a starting price, a firm number, or a range. |
+| `config/voice.md` | The voice the proposal's opening is written in, and the hard constraints enforced against every draft. |
 
 ## Local development
 

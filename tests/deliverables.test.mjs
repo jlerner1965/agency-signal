@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { buildRecommendations, validateEvidence, assertEvidence, groundRationale, serviceMenu } from "../lib/audit/recommendations.js";
+import { buildRecommendations, validateEvidence, assertEvidence, groundRationale } from "../lib/audit/recommendations.js";
 import { extractBrandTokens, extractPalette } from "../lib/audit/brand.js";
 import { buildHomepageMockup, buildServicePageMockup } from "../lib/audit/mockup.js";
 
@@ -54,20 +54,27 @@ test("a citation the model invented makes the whole rationale unusable", () => {
   assert.equal(groundRationale("F1 and F2 both show it.", [1, 2]).usable, true);
 });
 
-test("every service-menu entry is priced in config/pricing.json", async () => {
+test("every deliverable declares a trigger this engine can act on", async () => {
   const pricing = JSON.parse(await readFile(resolve(root, "config/pricing.json"), "utf8"));
-  for (const service of serviceMenu) {
-    assert.ok(pricing.services[service.id], `${service.id} has no pricing entry`);
-    const tier = pricing.tiers.find((entry) => entry.id === pricing.services[service.id].tier);
-    assert.ok(tier, `${service.id} points at a tier that does not exist`);
+  const { triggerSources } = await import("../lib/audit/pricing.js");
+  for (const [id, deliverable] of Object.entries(pricing.deliverables)) {
+    assert.ok(triggerSources[deliverable.triggered_by], `${id} is triggered by "${deliverable.triggered_by}", which maps to no audit module`);
+    assert.ok(Object.keys(deliverable.bands ?? {}).length > 0, `${id} has no bands`);
+    for (const [key, band] of Object.entries(deliverable.bands)) {
+      assert.ok(Number.isFinite(band.min) && Number.isFinite(band.max), `${id}.${key} lacks figures`);
+      assert.ok(band.min <= band.max, `${id}.${key} has min above max`);
+      assert.ok(band.criteria, `${id}.${key} has no criteria to select it by`);
+    }
   }
+  assert.ok(Number.isFinite(pricing.minimum_engagement));
+  assert.ok(["starts_at", "firm", "range"].includes(pricing.display_mode));
 });
 
-test("pricing still ships as a placeholder and says so", async () => {
+test("pricing carries real figures, so nothing blocks on it", async () => {
   const pricing = JSON.parse(await readFile(resolve(root, "config/pricing.json"), "utf8"));
-  // A proposal is not exportable while this is true, so the flag has to be set.
-  assert.equal(pricing.placeholder, true);
-  assert.ok(pricing.tiers.every((tier) => /PLACEHOLDER/.test(tier.summary)));
+  // The shipped stub set this true; real figures leave it absent.
+  assert.notEqual(pricing.placeholder, true);
+  assert.equal(pricing.version, 1);
 });
 
 test("the voice file is real, and carries the rules the code enforces", async () => {

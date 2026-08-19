@@ -61,6 +61,42 @@ export default function ProposalView({ token, ownerName }: { token: string; owne
               {blocked.map((reason) => <span key={reason}>{reason}</span>)}
             </div>
           )}
+          {(() => {
+            const scope = (draft as unknown as { scopeItems?: Array<Record<string, string | number>> }).scopeItems ?? [];
+            const retainer = (draft as unknown as { retainer?: string }).retainer;
+            const parsedRetainer = retainer ? JSON.parse(retainer) as { label: string; criteria: string; display: string } : null;
+            if (!scope.length) return null;
+            return (
+              <section className="proposal-container proposal-pricing">
+                <p className="eyebrow">Scope and investment</p>
+                <ul>
+                  {scope.map((item) => (
+                    <li key={String(item.deliverable)}>
+                      <div>
+                        <strong>{item.label}{Number(item.quantity) > 1 ? ` × ${item.quantity}` : ""}</strong>
+                        <small>{item.criteria}</small>
+                        <em>{item.rationale}</em>
+                      </div>
+                      <b>{item.display}</b>
+                    </li>
+                  ))}
+                </ul>
+                <div className="proposal-total">
+                  <span>Total</span>
+                  <b>{(draft as unknown as { priceDisplay?: string }).priceDisplay}</b>
+                  {(draft as unknown as { minimumApplied?: boolean }).minimumApplied && (
+                    <small>The minimum engagement applies.</small>
+                  )}
+                </div>
+                {parsedRetainer && (
+                  <div className="proposal-retainer">
+                    <div><strong>{parsedRetainer.label}</strong><small>{parsedRetainer.criteria}</small></div>
+                    <b>{parsedRetainer.display}</b>
+                  </div>
+                )}
+              </section>
+            );
+          })()}
           {draft.openingProse ? (
             <section className="proposal-container proposal-opening">
               {draft.openingProse.split(/\n{2,}/).map((paragraph, index) => (

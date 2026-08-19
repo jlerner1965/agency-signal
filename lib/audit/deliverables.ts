@@ -7,13 +7,29 @@ import { extractBrandTokens } from "@/lib/audit/brand";
 import { buildHomepageMockup, buildServicePageMockup } from "@/lib/audit/mockup";
 import { runtimeValue } from "@/lib/runtime-env";
 import pricingConfig from "@/config/pricing.json";
+import { formatFigure, priceProposal, selectDeliverables, selectRetainer, verifyFigures } from "@/lib/audit/pricing";
 
 const makeToken = () => crypto.randomUUID().replaceAll("-", "");
 
-export type PricingTier = { id: string; name: string; price: number; timeline: string; summary: string; includes: string[] };
+export type PricingConfig = {
+  version: number;
+  currency: string;
+  display_mode: string;
+  minimum_engagement: number;
+  hourly: { label: string; min: number; max: number };
+  deliverables: Record<string, { label: string; triggered_by: string; unit?: string; bands: Record<string, { criteria: string; min: number; max: number }> }>;
+  retainer?: { label: string; offer_when: string; bands: Record<string, { criteria: string; min: number; max: number }> };
+  /** Absent once real figures are in place; the shipped stub set it true. */
+  placeholder?: boolean;
+};
 
 export function pricing() {
-  return pricingConfig as { placeholder: boolean; currency: string; tiers: PricingTier[]; services: Record<string, { label: string; tier: string }> };
+  return pricingConfig as unknown as PricingConfig;
+}
+
+/** True only while the file still carries the shipped placeholder amounts. */
+export function pricingIsPlaceholder(config: PricingConfig) {
+  return config.placeholder === true;
 }
 
 /** The voice sample, and whether it is still the shipped placeholder. */
@@ -192,34 +208,53 @@ async function writeRationale(apiKey: string, recommendation: { label: string },
   }
 }
 
-/** A proposal draft. Nothing here is exportable while pricing or voice are placeholders. */
-export async function buildRunProposal(runId: number, tierId?: string) {
+/**
+ * A proposal draft, priced from the audit. Deliverables are selected by what
+ * the run found, one band each, and no figure is emitted that does not trace
+ * back to config/pricing.json.
+ */
+export async function buildRunProposal(runId: number) {
   const db = await getDb();
   const [run] = await db.select().from(auditRuns).where(eq(auditRuns.id, runId)).limit(1);
   if (!run) throw new Error("Audit run not found.");
   const recs = await db.select().from(recommendations).where(eq(recommendations.runId, runId)).orderBy(recommendations.sortOrder);
   if (!recs.length) throw new Error("Build the recommendations before the proposal.");
 
-  const stored = await db.select().from(findingsTable).where(eq(findingsTable.runId, runId));
+  const stored = await db.select().from(findingsTable).where(eq(findingsTable.runId, runId)).orderBy(findingsTable.sortOrder);
   assertEvidence(recs.map((rec) => ({ label: rec.label, findingIds: JSON.parse(rec.findingIds) as number[] })), stored);
 
   const config = pricing();
-  const suggestedTier = config.services[recs[0].serviceLine]?.tier ?? config.tiers[1]?.id ?? config.tiers[0].id;
-  const tier = config.tiers.find((entry) => entry.id === (tierId || suggestedTier)) ?? config.tiers[0];
-  const voice = await voiceSample();
+  const payloads = await runPayloads(runId);
+  const crawl = payloads.find((payload) => payload.source === "crawl");
+  const sitemap = payloads.find((payload) => payload.source === "sitemap");
+  const places = payloads.find((payload) => payload.source === "places");
+  const serviceLines = await serviceLinesFor(runId);
 
-  const [previous] = await db.select().from(proposals).where(eq(proposals.leadId, run.leadId)).orderBy(desc(proposals.version)).limit(1);
-  const version = (previous?.version ?? 0) + 1;
+  const selected = selectDeliverables(config, {
+    findings: stored,
+    serviceLines,
+    diagnostics: (crawl?.payload as { diagnostics?: Record<string, unknown> } | null)?.diagnostics ?? null,
+    sitemap: (sitemap?.ok ? sitemap.payload : null) as Record<string, unknown> | null,
+    googleKnown: Boolean(places?.ok && places.payload),
+  });
+  if (!selected.length) {
+    throw new Error("The audit did not trigger any priced deliverable, so there is nothing to propose.");
+  }
 
-  const scopeItems = recs.map((rec) => ({
-    serviceLine: rec.serviceLine,
-    label: rec.label,
-    rationale: rec.rationale,
-    findingIds: JSON.parse(rec.findingIds) as number[],
-  }));
+  const priced = priceProposal(config, selected);
+  // A figure that cannot be traced to the file is a refusal, not a rounding.
+  const traced = verifyFigures(config, priced);
+  if (!traced.valid) throw new Error(`Pricing failed its own check: ${traced.problems.join(" ")}`);
+
+  const retainer = selectRetainer(config, {
+    googleKnown: Boolean(places?.ok && places.payload),
+    googleFindings: stored.filter((finding) => finding.module === "google"),
+    serviceLineGaps: serviceLines.filter((line) => line.hasLandingPage === false).length,
+  });
 
   const [lead] = await db.select().from(leads).where(eq(leads.id, run.leadId)).limit(1);
   const runMockups = await db.select().from(mockups).where(eq(mockups.runId, runId));
+  const voice = await voiceSample();
   const opening = await writeOpening({
     businessName: lead?.agencyName ?? "this business",
     findings: stored,
@@ -228,18 +263,44 @@ export async function buildRunProposal(runId: number, tierId?: string) {
     voicePlaceholder: voice.placeholder,
   });
 
+  const [previous] = await db.select().from(proposals).where(eq(proposals.leadId, run.leadId)).orderBy(desc(proposals.version)).limit(1);
+  const version = (previous?.version ?? 0) + 1;
+
+  const scopeItems = priced.lines.map((line) => ({
+    deliverable: line.id,
+    label: line.label,
+    band: line.bandKey,
+    criteria: line.criteria,
+    quantity: line.quantity,
+    unit: line.unit,
+    unitMin: line.min,
+    unitMax: line.max,
+    lineMin: line.lineMin,
+    lineMax: line.lineMax,
+    display: formatFigure(config, { min: line.lineMin, max: line.lineMax }),
+    rationale: line.rationale,
+    findingIds: line.findingIds,
+  }));
+
   const [proposal] = await db.insert(proposals).values({
     leadId: run.leadId, runId, version, token: makeToken(),
-    offerId: recs[0].serviceLine, title: `${tier.name} — ${recs[0].label}`,
-    service: recs[0].label, outcome: tier.summary, scope: recs.map((rec) => rec.label).join(", "),
-    deliverables: JSON.stringify(tier.includes),
+    offerId: priced.lines[0].id, title: priced.lines[0].label,
+    service: priced.lines.map((line) => line.label).join(", "),
+    outcome: priced.lines[0].criteria,
+    scope: priced.lines.map((line) => line.rationale).join(" "),
+    deliverables: JSON.stringify(priced.lines.map((line) => `${line.label}${line.quantity > 1 ? ` × ${line.quantity}` : ""}`)),
     scopeItems: JSON.stringify(scopeItems),
     openingProse: opening.text,
     openingSource: opening.source,
     openingBlocked: opening.blocked,
-    price: tier.price, timeline: tier.timeline, tier: tier.id,
+    price: priced.totalMin,
+    priceDisplay: formatFigure(config, { min: priced.totalMin, max: priced.totalMax }),
+    retainer: retainer ? JSON.stringify({ ...retainer, display: formatFigure(config, retainer) }) : "",
+    minimumApplied: priced.belowMinimum,
+    timeline: "",
+    tier: priced.lines[0].bandKey,
     status: "Draft",
-    pricingPlaceholder: config.placeholder,
+    pricingPlaceholder: pricingIsPlaceholder(config),
     voicePlaceholder: voice.placeholder,
     expiresAt: new Date(Date.now() + 14 * 86_400_000).toISOString(),
   }).returning();
