@@ -1,7 +1,13 @@
 #!/usr/bin/env node
-// Applies drizzle/*.sql to the local Miniflare D1 database that `npm run dev`
-// uses. The hosted runtime applies the same files from dist/.openai/drizzle, so
-// this script exists purely to give local development the same schema.
+// Applies drizzle/*.sql to a D1 database, tracked by tag so it is safe to
+// re-run. Two targets:
+//
+//   (default)  the local Miniflare database `npm run dev` uses.
+//   --remote   the deployed Cloudflare D1 named by CLOUDFLARE_D1_DATABASE_ID.
+//
+// The Sites runtime applies the same files from dist/.openai/drizzle by itself.
+// A direct `wrangler deploy` does not, so a Cloudflare deploy must run this
+// with --remote before the new Worker serves traffic.
 import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -10,18 +16,35 @@ import { resolve } from "node:path";
 const run = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
 const persistTo = resolve(root, ".wrangler/state");
-const configPath = resolve(root, ".wrangler/migrate.wrangler.json");
 const TRACKING_TABLE = "_agencysignal_migrations";
 
 // Must match vite.config.ts, or Miniflare resolves a different local database.
 const PLACEHOLDER_DATABASE_ID = "00000000-0000-4000-8000-000000000000";
 
 const flags = new Set(process.argv.slice(2).filter((value) => value.startsWith("--")));
+const remote = flags.has("--remote");
+// Separate files, so a local run can never reuse a config naming the real database.
+const configPath = resolve(root, `.wrangler/migrate${remote ? ".remote" : ""}.wrangler.json`);
 
 const hosting = JSON.parse(await readFile(resolve(root, ".openai/hosting.json"), "utf8"));
 const binding = hosting.d1;
 if (!binding) {
   console.error('No "d1" binding is configured in .openai/hosting.json.');
+  process.exit(78);
+}
+
+// The remote database is addressed by its real id. Nothing derives it, because
+// guessing wrong would migrate someone else's database.
+const databaseId = remote ? (process.env.CLOUDFLARE_D1_DATABASE_ID ?? "").trim() : PLACEHOLDER_DATABASE_ID;
+const databaseName = remote
+  ? (process.env.CLOUDFLARE_D1_DATABASE_NAME ?? "agency-signal").trim()
+  : "site-creator-d1";
+
+if (remote && !databaseId) {
+  console.error(
+    "CLOUDFLARE_D1_DATABASE_ID is not set, so there is no remote database to migrate.\n" +
+    "Create one with `npx wrangler d1 create agency-signal` and export the id it prints.",
+  );
   process.exit(78);
 }
 
@@ -32,15 +55,20 @@ await writeFile(
     name: "agency-signal-migrate",
     compatibility_date: "2025-01-01",
     compatibility_flags: ["nodejs_compat"],
-    d1_databases: [{ binding, database_name: "site-creator-d1", database_id: PLACEHOLDER_DATABASE_ID }],
+    d1_databases: [{ binding, database_name: databaseName, database_id: databaseId }],
   }, null, 2)}\n`,
 );
+
+// --remote talks to Cloudflare and must not be pointed at local state.
+const targetArgs = remote ? ["--remote"] : ["--local", "--persist-to", persistTo];
+const label = remote ? "remote" : "local";
+const command = remote ? "db:migrate:remote" : "db:migrate";
 
 async function d1(args) {
   const { stdout } = await run(
     process.execPath,
     [resolve(root, "node_modules/wrangler/bin/wrangler.js"), "d1", "execute", binding,
-      "--local", "--yes", "--json", "--config", configPath, "--persist-to", persistTo, ...args],
+      "--yes", "--json", "--config", configPath, ...targetArgs, ...args],
     { cwd: root, maxBuffer: 32 * 1024 * 1024 },
   );
   // Wrangler prints banners before the JSON payload, so start at the array.
@@ -73,9 +101,9 @@ if (!applied.size) {
   const existing = await query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'leads'");
   if (existing.length) {
     console.error(
-      "The local database already has application tables but no migration history.\n" +
-      "Run `npm run db:migrate -- --baseline` if its schema is current, or delete\n" +
-      ".wrangler/state/v3/d1 to rebuild it from scratch.",
+      `The ${label} database already has application tables but no migration history.\n` +
+      `Run \`npm run ${command} -- --baseline\` if its schema is current` +
+      (remote ? "." : ", or delete\n.wrangler/state/v3/d1 to rebuild it from scratch."),
     );
     process.exit(65);
   }
@@ -83,7 +111,7 @@ if (!applied.size) {
 
 const pending = entries.filter((entry) => !applied.has(entry.tag));
 if (!pending.length) {
-  console.log(`Local D1 is up to date — ${entries.length} migrations already applied.`);
+  console.log(`${remote ? "Remote" : "Local"} D1 is up to date — ${entries.length} migrations already applied.`);
   process.exit(0);
 }
 
@@ -94,4 +122,4 @@ for (const entry of pending) {
   console.log("done");
 }
 
-console.log(`Applied ${pending.length} migration${pending.length === 1 ? "" : "s"} to the local D1 database.`);
+console.log(`Applied ${pending.length} migration${pending.length === 1 ? "" : "s"} to the ${label} D1 database.`);
