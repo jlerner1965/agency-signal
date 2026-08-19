@@ -158,6 +158,8 @@ export const proposals = sqliteTable("proposals", {
   tier: text("tier").notNull().default(""),
   scopeItems: text("scope_items").notNull().default("[]"),
   openingProse: text("opening_prose").notNull().default(""),
+  openingSource: text("opening_source").notNull().default("none"),
+  openingBlocked: text("opening_blocked").notNull().default(""),
   pricingPlaceholder: integer("pricing_placeholder", { mode: "boolean" }).notNull().default(true),
   voicePlaceholder: integer("voice_placeholder", { mode: "boolean" }).notNull().default(true),
   approvedAt: text("approved_at"),

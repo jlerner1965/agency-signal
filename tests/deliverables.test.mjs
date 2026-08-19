@@ -63,12 +63,25 @@ test("every service-menu entry is priced in config/pricing.json", async () => {
   }
 });
 
-test("shipped pricing and voice are marked as placeholders", async () => {
+test("pricing still ships as a placeholder and says so", async () => {
   const pricing = JSON.parse(await readFile(resolve(root, "config/pricing.json"), "utf8"));
-  // A proposal is not exportable while either is a placeholder, so the flag has
-  // to actually be set on what ships.
+  // A proposal is not exportable while this is true, so the flag has to be set.
   assert.equal(pricing.placeholder, true);
-  assert.match(await readFile(resolve(root, "config/voice.md"), "utf8"), /PLACEHOLDER/);
+  assert.ok(pricing.tiers.every((tier) => /PLACEHOLDER/.test(tier.summary)));
+});
+
+test("the voice file is real, and carries the rules the code enforces", async () => {
+  const voice = await readFile(resolve(root, "config/voice.md"), "utf8");
+  // The detector keys on a sentinel, not the word: this file discusses
+  // placeholders in its own rules and must not be read as being one.
+  assert.ok(!/<!--\s*voice:placeholder\s*-->/.test(voice), "no stub sentinel");
+  assert.ok(!/^PLACEHOLDER VOICE SAMPLE/m.test(voice), "not the shipped stub");
+  assert.match(voice, /do not emit a\s+placeholder/i, "the word appears legitimately in the rules");
+  // The hard constraints are the part enforced in code; if the file stops
+  // stating one, the enforcement has drifted from its source.
+  for (const rule of [/Never state a number the audit did not measure/, /Never assert a finding the run didn't verify/, /Never reference a visual the run didn't produce/, /Never name a price absent from config\/pricing\.json/, /Never imply prior contact/]) {
+    assert.match(voice, rule);
+  }
 });
 
 test("brand tokens come from the site, and defaults are reported as defaults", () => {

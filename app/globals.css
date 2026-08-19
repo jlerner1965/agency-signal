@@ -744,3 +744,9 @@ td { height: 70px; font-size: 12px; }
 .proposal-stub { margin: 0 auto; max-width: 900px; padding: 14px 18px; background: #fdf6e6; border: 1px solid #e8d59a; border-radius: 8px; display: grid; gap: 4px; }
 .proposal-stub strong { color: #7d5810; font-size: 12px; }
 .proposal-stub span { color: #86601a; font-size: 10px; line-height: 1.6; }
+
+/* The proposal opening, read once on a phone. */
+.proposal-opening { max-width: 640px; padding: 30px 0 6px; }
+.proposal-opening p { margin: 0 0 16px; font-size: 15px; line-height: 1.72; color: #253039; }
+.proposal-opening p:first-child { font-size: 16px; }
+.proposal-stub span { display: block; }

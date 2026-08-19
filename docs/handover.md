@@ -90,7 +90,7 @@ Only a genuinely scored run may write the prospect's headline score.
 | Which modules run and what keys they want | `lib/audit/registry.js` |
 | Findings → service menu mapping, and the evidence gate | `lib/audit/recommendations.js` |
 | Proposal tiers and the service menu | `config/pricing.json` |
-| Proposal opening voice | `config/voice.md` |
+| Proposal opening voice, and the rules enforced against it | `config/voice.md`, `lib/audit/proposal-voice.js` |
 | Brand token extraction | `lib/audit/brand.js` |
 | Mockup templates | `lib/audit/mockup.js` |
 
@@ -113,6 +113,30 @@ category exceeds the cap.
   listing plus one about the category — not one per service. Per-service gaps
   are only emitted when Google lists services and a specific one is missing.
   Places `types` are Google's own taxonomy and do not count as a service list.
+
+## The proposal opening
+
+`config/voice.md` defines the voice and, at the bottom, five hard constraints
+its author calls "worse than no proposal" if broken. Those are enforced in
+`lib/audit/proposal-voice.js` rather than merely asked of the model:
+
+- **No number the audit did not measure.** Every digit in a draft is checked
+  against the numbers appearing in the cited findings' own evidence. Counts
+  attached to things the audit never measures — calls, leads, competitors,
+  revenue — are rejected whether written in digits or in words.
+- **No unverified finding, and absence of data is not a finding.** A "could not
+  be read" finding is excluded from the opening entirely; a run whose strongest
+  finding is missing data produces no opening at all, which the voice file calls
+  a signal not to send.
+- **No visual that does not exist.** Section three is dropped when the run
+  produced no mockup, and any reference to one is rejected.
+- **No price outside `config/pricing.json`**, and no implied prior contact.
+
+A model draft is used only if it clears every constraint; otherwise a
+deterministic composition runs, which obeys the same rules by construction and
+records itself as `composed` rather than `model`. Technical terms are translated
+into consequences at the point of use, so the reader never has to look anything
+up.
 
 ## Known limitations
 

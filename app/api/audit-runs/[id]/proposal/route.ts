@@ -18,8 +18,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // the reason is stated rather than left for the reader to discover.
       blockers: [
         config.placeholder ? "config/pricing.json still holds placeholder amounts." : "",
-        voice.placeholder ? "config/voice.md has not been filled in, so the opening is a stub." : "",
+        voice.placeholder ? "config/voice.md has not been filled in, so no opening was written." : "",
+        // An audit that found nothing specific enough to open with is a signal
+        // not to send, so it blocks export the same way a placeholder does.
+        proposal.openingBlocked || "",
       ].filter(Boolean),
+      openingSource: proposal.openingSource,
     }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to build the proposal." }, { status: 400 });

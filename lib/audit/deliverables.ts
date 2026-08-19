@@ -2,6 +2,7 @@ import { desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditRunModules, auditRuns, findings as findingsTable, leads, mockups, proposals, rawPayloads, recommendations } from "@/db/schema";
 import { assertEvidence, buildRecommendations, groundRationale } from "@/lib/audit/recommendations";
+import { buildVoicePrompt, composeOpening, hasSendableHook, planFromFindings, selectOpeningFindings, validateVoice } from "@/lib/audit/proposal-voice";
 import { extractBrandTokens } from "@/lib/audit/brand";
 import { buildHomepageMockup, buildServicePageMockup } from "@/lib/audit/mockup";
 import { runtimeValue } from "@/lib/runtime-env";
@@ -19,7 +20,10 @@ export function pricing() {
 export async function voiceSample() {
   // Bundled at build time; a Worker has no filesystem to read at runtime.
   const raw = (await import("@/config/voice.md?raw")).default as string;
-  const placeholder = /PLACEHOLDER/i.test(raw);
+  // A specific sentinel, not any mention of the word: the real voice file
+  // discusses placeholders in its own rules, and matching that would read a
+  // finished file as an unfinished one.
+  const placeholder = /<!--\s*voice:placeholder\s*-->/.test(raw) || /^PLACEHOLDER VOICE SAMPLE/m.test(raw);
   return { raw, placeholder };
 }
 
@@ -94,6 +98,73 @@ export async function buildRunRecommendations(runId: number) {
   return db.select().from(recommendations).where(eq(recommendations.runId, runId)).orderBy(recommendations.sortOrder);
 }
 
+/**
+ * The proposal opening. A model draft is used only if it clears every hard
+ * constraint in config/voice.md; otherwise the deterministic composition runs,
+ * which obeys the same rules by construction. When the audit found nothing
+ * specific enough to open with, no opening is written at all — the voice file
+ * calls that a signal not to send, not a cue to generalise.
+ */
+async function writeOpening({ businessName, findings, recommendations: recs, mockups: runMockups, voicePlaceholder }: {
+  businessName: string;
+  findings: Array<{ id: number; category: string; severity: string; title: string; evidence: string; recommendation: string; impactNote: string; priority: number }>;
+  recommendations: Array<{ label: string; rationale: string }>;
+  mockups: Array<{ kind: string; title: string }>;
+  voicePlaceholder: boolean;
+}) {
+  if (voicePlaceholder) {
+    return { text: "", source: "none", blocked: "config/voice.md is still a placeholder, so no opening has been written." };
+  }
+
+  const sendable = hasSendableHook(findings);
+  if (!sendable.sendable) {
+    return { text: "", source: "none", blocked: `${sendable.reason} The audit did not surface something specific enough to open with, which is a signal not to send.` };
+  }
+
+  const selected = selectOpeningFindings(findings);
+  const hasMockup = runMockups.length > 0;
+  const mockupLabel = runMockups[0]?.title?.toLowerCase() ?? "";
+  // Steps are the actions the findings call for, in priority order. A service
+  // name is not something a person can be told they would do.
+  const planSteps = planFromFindings(selected, recs.map((rec) => rec.label));
+
+  const context = { businessName, findings: selected, hasMockup, planSteps, mockupLabel };
+  const apiKey = await runtimeValue("OPENAI_API_KEY");
+
+  if (apiKey) {
+    const draft = await requestOpening(apiKey, buildVoicePrompt(context));
+    if (draft) {
+      const check = validateVoice(draft, { findings: selected, hasMockup });
+      // A draft that trips a hard constraint is discarded, not patched.
+      if (check.valid) return { text: draft, source: "model", blocked: "" };
+    }
+  }
+
+  const composed = composeOpening(context);
+  const check = validateVoice(composed, { findings: selected, hasMockup });
+  if (!check.valid) {
+    return { text: "", source: "none", blocked: `The opening could not be written within the voice rules: ${check.violations.map((violation) => violation.message).join("; ")}.` };
+  }
+  return { text: composed, source: apiKey ? "composed-after-model-rejected" : "composed", blocked: "" };
+}
+
+async function requestOpening(apiKey: string, prompt: string) {
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: (await runtimeValue("OPENAI_MODEL")) || "gpt-5.4-nano", input: prompt, max_output_tokens: 700 }),
+    });
+    if (!response.ok) return "";
+    const payload = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
+    return (payload.output_text
+      ?? payload.output?.flatMap((item) => item.content ?? []).find((content) => content.type === "output_text")?.text
+      ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function writeRationale(apiKey: string, recommendation: { label: string }, cited: Array<{ id: number; title: string; evidence: string }>) {
   const evidence = cited.map((finding) => `F${finding.id}: ${finding.title} — ${finding.evidence}`).join("\n");
   const prompt = [
@@ -147,9 +218,15 @@ export async function buildRunProposal(runId: number, tierId?: string) {
     findingIds: JSON.parse(rec.findingIds) as number[],
   }));
 
-  const opening = voice.placeholder
-    ? "PLACEHOLDER OPENING — config/voice.md has not been filled in, so no opening has been written. Replace that file with two or three paragraphs you have actually sent a prospect."
-    : "";
+  const [lead] = await db.select().from(leads).where(eq(leads.id, run.leadId)).limit(1);
+  const runMockups = await db.select().from(mockups).where(eq(mockups.runId, runId));
+  const opening = await writeOpening({
+    businessName: lead?.agencyName ?? "this business",
+    findings: stored,
+    recommendations: recs,
+    mockups: runMockups,
+    voicePlaceholder: voice.placeholder,
+  });
 
   const [proposal] = await db.insert(proposals).values({
     leadId: run.leadId, runId, version, token: makeToken(),
@@ -157,7 +234,9 @@ export async function buildRunProposal(runId: number, tierId?: string) {
     service: recs[0].label, outcome: tier.summary, scope: recs.map((rec) => rec.label).join(", "),
     deliverables: JSON.stringify(tier.includes),
     scopeItems: JSON.stringify(scopeItems),
-    openingProse: opening,
+    openingProse: opening.text,
+    openingSource: opening.source,
+    openingBlocked: opening.blocked,
     price: tier.price, timeline: tier.timeline, tier: tier.id,
     status: "Draft",
     pricingPlaceholder: config.placeholder,

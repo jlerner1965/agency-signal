@@ -46,15 +46,33 @@ export default function ProposalView({ token, ownerName }: { token: string; owne
   return <main className="proposal-shell">
     <header className="proposal-nav"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><div className="proposal-nav-actions"><span>Prepared for {lead.agencyName}</span><button onClick={copyLink}>{copied ? "Copied" : "Copy link"}</button><button className="primary" onClick={() => window.print()}>Print / Save PDF</button></div></header>
     <section className="proposal-hero"><div className="proposal-container"><p className="eyebrow">Digital growth proposal</p><h1>{proposal.title}</h1><p>{proposal.outcome}</p><div className="proposal-summary"><span>Investment<strong>${proposal.price.toLocaleString("en-US")}</strong></span><span>Timeline<strong>{proposal.timeline}</strong></span><span>Valid until<strong>{new Date(proposal.expiresAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong></span></div></div></section>
-    {(proposal as unknown as { voicePlaceholder?: boolean; pricingPlaceholder?: boolean }).voicePlaceholder || (proposal as unknown as { pricingPlaceholder?: boolean }).pricingPlaceholder ? (
-      <div className="proposal-stub" role="status">
-        <strong>Draft — not ready to send.</strong>
-        <span>
-          {(proposal as unknown as { pricingPlaceholder?: boolean }).pricingPlaceholder ? "The amounts below come from placeholder pricing. " : ""}
-          {(proposal as unknown as { voicePlaceholder?: boolean }).voicePlaceholder ? "The opening section has not been written." : ""}
-        </span>
-      </div>
-    ) : null}
+{(() => {
+      const draft = proposal as unknown as { voicePlaceholder?: boolean; pricingPlaceholder?: boolean; openingProse?: string; openingBlocked?: string };
+      const blocked = [
+        draft.pricingPlaceholder ? "The amounts below come from placeholder pricing." : "",
+        draft.voicePlaceholder ? "No opening has been written — config/voice.md is still a placeholder." : "",
+        draft.openingBlocked || "",
+      ].filter(Boolean);
+      return (
+        <>
+          {blocked.length > 0 && (
+            <div className="proposal-stub" role="status">
+              <strong>Draft — not ready to send.</strong>
+              {blocked.map((reason) => <span key={reason}>{reason}</span>)}
+            </div>
+          )}
+          {draft.openingProse ? (
+            <section className="proposal-container proposal-opening">
+              {draft.openingProse.split(/\n{2,}/).map((paragraph, index) => (
+                <p key={index}>{paragraph.split("\n").map((line, lineIndex) => (
+                  <span key={lineIndex}>{line}<br /></span>
+                ))}</p>
+              ))}
+            </section>
+          ) : null}
+        </>
+      );
+    })()}
     <section className="proposal-container proposal-body"><div><p className="eyebrow">Why this work</p><h2>A focused response to an identified opportunity.</h2><p>{proposal.scope}</p><p>This scope is designed to improve a measurable customer-acquisition outcome without adding work that is not tied to the stated objective.</p></div><aside><span>Recommended service</span><strong>{proposal.service}</strong><small>Prepared by {ownerName}</small></aside></section>
     {findings.length > 0 && <section className="proposal-evidence"><div className="proposal-container"><div className="proposal-evidence-head"><div><p className="eyebrow">Audit evidence</p><h2>What the digital presence review found</h2>{audit && <p>{audit.checksPassed} checks passed · {audit.checksFailed} need work · {audit.confidenceScore}/100 evidence confidence</p>}</div><div className="proposal-score-pair">{audit && <div className="proposal-audit-score"><strong>{audit.score}</strong><span>website score<br />{audit.pagesAudited} page{audit.pagesAudited === 1 ? "" : "s"} reviewed</span></div>}{googleAudit && <div className="proposal-audit-score"><strong>{googleAudit.score}</strong><span>Google presence<br />profile scorecard</span></div>}</div></div>{competitors.length > 0 && <div className="proposal-benchmarks"><span>Competitive website benchmark</span>{competitors.map((item) => <article key={item.id}><strong>{item.name}</strong><b>{item.score}/100</b></article>)}</div>}<div className="proposal-evidence-grid">{findings.map((finding, index) => <article key={`${finding.title}-${index}`}><span>{finding.category} · {finding.severity}</span><h3>{finding.title}</h3><p>{finding.evidence}</p><strong>Recommended</strong><p>{finding.recommendation}</p></article>)}</div></div></section>}
     <section className="proposal-deliverables"><div className="proposal-container"><p className="eyebrow">Included</p><h2>Deliverables and implementation</h2><ol>{proposal.deliverables.map((item, index) => <li key={item}><span>0{index + 1}</span><strong>{item}</strong></li>)}</ol></div></section>
