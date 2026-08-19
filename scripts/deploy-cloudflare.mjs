@@ -8,6 +8,11 @@
 // those to the real ones and deploys, rather than keeping a second hand-written
 // config that could drift from what the build actually produces.
 //
+// Run this directly, not through scripts/sites-env.sh. That helper redirects
+// XDG_CONFIG_HOME into .sites-runtime, and Wrangler keeps its OAuth token under
+// that directory — so a normal `wrangler login` would be invisible here and
+// every deploy would report you as unauthenticated.
+//
 //   CLOUDFLARE_D1_DATABASE_ID    required. `npx wrangler d1 create <name>` prints it.
 //   CLOUDFLARE_D1_DATABASE_NAME  optional, defaults to the Worker name.
 //   CLOUDFLARE_WORKER_NAME       optional, defaults to agency-signal.
@@ -77,10 +82,23 @@ if (dryRun) {
 }
 
 console.log("\nDeploying…\n");
-const { stdout, stderr } = await run(
-  process.execPath,
-  [resolve(root, "node_modules/wrangler/bin/wrangler.js"), "deploy", "--config", patched],
-  { cwd: root, maxBuffer: 32 * 1024 * 1024 },
-);
-process.stdout.write(stdout);
-if (stderr) process.stderr.write(stderr);
+try {
+  const { stdout, stderr } = await run(
+    process.execPath,
+    [resolve(root, "node_modules/wrangler/bin/wrangler.js"), "deploy", "--config", patched],
+    { cwd: root, maxBuffer: 32 * 1024 * 1024 },
+  );
+  process.stdout.write(stdout);
+  if (stderr) process.stderr.write(stderr);
+} catch (error) {
+  const output = `${error.stdout ?? ""}${error.stderr ?? ""}`;
+  process.stdout.write(output);
+  // Wrangler's own wording for this is easy to misread as a broken deploy.
+  if (/not authenticated|not logged in|Authentication error/i.test(output)) {
+    console.error(
+      "\nWrangler is not authenticated. Run `npx wrangler login` in this same\n" +
+      "directory and shell, then run `npm run deploy` again.",
+    );
+  }
+  process.exit(error.code ?? 1);
+}

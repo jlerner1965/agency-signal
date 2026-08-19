@@ -8,6 +8,11 @@
 // The Sites runtime applies the same files from dist/.openai/drizzle by itself.
 // A direct `wrangler deploy` does not, so a Cloudflare deploy must run this
 // with --remote before the new Worker serves traffic.
+//
+// --remote must not run through scripts/sites-env.sh: that helper redirects
+// XDG_CONFIG_HOME into .sites-runtime, where Wrangler keeps its OAuth token, so
+// a normal `wrangler login` would be invisible and every remote call would fail
+// as unauthenticated. The local target still uses it, for the Miniflare paths.
 import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
