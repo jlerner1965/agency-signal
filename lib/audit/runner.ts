@@ -482,6 +482,11 @@ async function finalizeRun(runId: number) {
   }
 
   const outOfScope = checks.length - scoped.length;
+  // A site that refused us already has the reason on the module that hit it.
+  // Without carrying it up, the panel renders "the site could not be fetched
+  // — " and stops, which is the one case where the reason matters most: the
+  // whole point of that sentence is that this is not a bad score.
+  const unreachableNote = moduleRows.find((row) => row.status === "Unreachable" && row.message)?.message ?? "";
   const underMeasuredNote = `Only ${confidence}% of the audit rubric could be verified (${checksVerified} of ${scoped.length} checks in scope${outOfScope ? `, with ${outOfScope} more needing a source this run did not have` : ""}), below the ${minimumConfidence}% needed to report a score. Configure PAGESPEED_API_KEY, or re-run when the unavailable sources respond.`;
 
   const [run] = await db.update(auditRuns).set({
@@ -498,7 +503,9 @@ async function finalizeRun(runId: number) {
     costCents: moduleRows.reduce((sum, row) => sum + row.costCents, 0),
     error: allFailed
       ? moduleRows.find((row) => row.message)?.message ?? "No module produced a result."
-      : underMeasured ? underMeasuredNote : "",
+      : underMeasured ? underMeasuredNote
+      : overall === null && unreachable ? unreachableNote
+      : "",
     finishedAt: sql`CURRENT_TIMESTAMP`,
     updatedAt: sql`CURRENT_TIMESTAMP`,
   }).where(eq(auditRuns.id, runId)).returning();
