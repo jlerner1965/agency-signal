@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatCents } from "@/lib/audit/cost-config";
 
 type RunModule = {
   id: number; module: string; label: string; status: string; message: string;
@@ -22,7 +21,14 @@ type Run = {
   error: string; finishedAt: string | null;
 };
 
-type Summary = { run: Run; modules: RunModule[]; findings: RunFinding[]; pending: boolean; waitingFor: string | null; waitingReason: string };
+type Diagnostics = {
+  finalUrl: string; finalStatus: number; robotsFetchable: boolean; robotsStatus: number;
+  robotsRules: number; crawlDelaySeconds: number | null; navigationServerRendered: boolean | null;
+  pagesAttempted: number; pagesReached: number; pagesDisallowed: number; truncatedBy: string;
+  blockedResponses: Array<{ url: string; status: number; server: string; cfRay: string }>;
+};
+
+type Summary = { run: Run; modules: RunModule[]; findings: RunFinding[]; diagnostics: Diagnostics | null; pending: boolean; waitingFor: string | null; waitingReason: string };
 
 type Check = {
   id: string; category: string; label: string; status: string;
@@ -178,10 +184,6 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
               <small>of rubric weight verified</small>
               <small className="engine-subdetail">{run.checksVerified} of {run.checksTotal} checks</small>
             </div>
-            <div className="engine-cost">
-              <b>{formatCents(run.costCents)}</b>
-              <small>estimated API cost</small>
-            </div>
           </header>
 
           {unscored && run.reachable === false && (
@@ -207,11 +209,35 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
                 <span className="engine-module-meta">
                   {module.attempts > 1 && `attempt ${module.attempts}/${module.maxAttempts} · `}
                   {module.findingCount} finding{module.findingCount === 1 ? "" : "s"}
-                  {module.costCents > 0 && ` · ${formatCents(module.costCents)}`}
                 </span>
               </li>
             ))}
           </ol>
+
+          {summary.diagnostics && (
+            <div className="engine-diagnostics">
+              <p className="eyebrow">Crawl diagnostics</p>
+              <dl>
+                <div><dt>Final response</dt><dd>HTTP {summary.diagnostics.finalStatus}</dd></div>
+                <div><dt>robots.txt</dt><dd>{summary.diagnostics.robotsFetchable ? `read, ${summary.diagnostics.robotsRules} rules` : "not fetchable"}</dd></div>
+                <div><dt>Crawl-delay</dt><dd>{summary.diagnostics.crawlDelaySeconds === null ? "none stated" : `${summary.diagnostics.crawlDelaySeconds}s`}</dd></div>
+                <div><dt>Navigation</dt><dd>{summary.diagnostics.navigationServerRendered === null ? "unknown" : summary.diagnostics.navigationServerRendered ? "in served HTML" : "JS-rendered"}</dd></div>
+                <div><dt>Pages</dt><dd>{summary.diagnostics.pagesReached} reached of {summary.diagnostics.pagesAttempted} attempted{summary.diagnostics.pagesDisallowed ? `, ${summary.diagnostics.pagesDisallowed} disallowed` : ""}</dd></div>
+                {summary.diagnostics.truncatedBy && <div><dt>Truncated by</dt><dd>{summary.diagnostics.truncatedBy}</dd></div>}
+              </dl>
+              {summary.diagnostics.blockedResponses.length > 0 && (
+                <ul className="engine-blocked">
+                  {summary.diagnostics.blockedResponses.map((blocked) => (
+                    <li key={blocked.url}>
+                      HTTP {blocked.status} · {new URL(blocked.url).pathname}
+                      {blocked.server && ` · server ${blocked.server}`}
+                      {blocked.cfRay && " · Cloudflare"}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {unmeasured.length > 0 && (
             <div className="engine-unmeasured">

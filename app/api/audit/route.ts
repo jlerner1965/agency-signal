@@ -5,6 +5,7 @@ import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildOpportunity } from "@/lib/opportunity";
 import { inspectWebsite } from "@/lib/website-inspection";
 import { saveAuditScreenshot } from "@/lib/audit-screenshots";
+import { minimumConfidence } from "@/lib/audit/scoring-config";
 
 export async function POST(request: Request) {
   const denied = await requireDashboardApi();
@@ -41,24 +42,40 @@ export async function POST(request: Request) {
     if (result.findings.length) {
       await db.insert(auditFindings).values(result.findings.map((finding: Record<string, unknown>) => ({ ...finding, auditId: audit.id })) as typeof auditFindings.$inferInsert[]);
     }
+    // One guarantee governs every stored score, whichever rubric produced it:
+    // a run that could not verify enough of its own rubric records the audit
+    // but does not write a headline number. The audit row is always kept.
+    const confident = result.confidenceScore >= minimumConfidence;
     const [lead] = await db.update(leads).set({
       website: result.finalUrl,
-      score: result.score,
-      visibilityScore: result.visibility,
-      conversionScore: result.conversion,
-      technicalScore: result.technical,
-      trustScore: result.trust,
+      ...(confident ? {
+        score: result.score,
+        visibilityScore: result.visibility,
+        conversionScore: result.conversion,
+        technicalScore: result.technical,
+        trustScore: result.trust,
+        scoreSource: "legacy",
+        scoreConfidence: result.confidenceScore,
+        lastAuditAt: sql`CURRENT_TIMESTAMP`,
+      } : {}),
       status: "Audited",
-      lastAuditAt: sql`CURRENT_TIMESTAMP`,
       updatedAt: sql`CURRENT_TIMESTAMP`,
     }).where(eq(leads.id, leadId)).returning();
     const opportunity = buildOpportunity(lead, result.findings);
     await db.insert(activities).values({
       leadId,
       activityType: "audit_completed",
-      description: `${result.pagesAudited}-page website audit completed · ${opportunity.primaryService} opportunity · score ${result.score}`,
+      description: confident
+        ? `${result.pagesAudited}-page website audit completed · ${opportunity.primaryService} opportunity · score ${result.score}`
+        : `${result.pagesAudited}-page website audit completed without a score · only ${result.confidenceScore}% of the rubric could be verified`,
     });
-    return Response.json({ lead, audit, findings: result.findings, pagesAudited: result.pagesAudited, opportunity, lighthouse: result.lighthouse, metadata: result.metadata });
+    return Response.json({
+      lead, audit, findings: result.findings, pagesAudited: result.pagesAudited, opportunity,
+      lighthouse: result.lighthouse, metadata: result.metadata,
+      scored: confident,
+      confidence: result.confidenceScore,
+      unscoredReason: confident ? "" : `Only ${result.confidenceScore}% of the audit rubric could be verified, below the ${minimumConfidence}% needed to report a score.`,
+    });
   } catch (error) {
     const message = error instanceof Error && error.name === "AbortError"
       ? "The website took too long to complete a multi-page review."

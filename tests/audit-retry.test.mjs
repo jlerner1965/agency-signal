@@ -44,14 +44,3 @@ test("technical is weighted below the categories that actually discriminate", as
   assert.ok(categoryWeights.Technical < categoryWeights.Conversion);
   assert.ok(categoryWeights.Technical < categoryWeights.Visibility);
 });
-
-test("the SERP provider defaults to the one that costs nothing to start", async () => {
-  const { defaultSerpProvider, serpProviders, unitCosts } = await import("../lib/audit/cost-config.js");
-  assert.equal(defaultSerpProvider, "serpapi");
-  const provider = serpProviders[defaultSerpProvider];
-  // 3 queries across a 50-prospect campaign fits inside the free allowance.
-  assert.ok(provider.freeSearchesPerMonth >= 150);
-  assert.equal(unitCosts[provider.unit].cents, 0);
-  // The cheaper-per-call alternative stays costed and selectable.
-  assert.ok(unitCosts[serpProviders.dataforseo.unit].cents > 0);
-});

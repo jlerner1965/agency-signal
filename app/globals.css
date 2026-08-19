@@ -616,7 +616,7 @@ td { height: 70px; font-size: 12px; }
 /* Audit engine — per-module run status and prioritised findings. */
 .engine-panel { display: grid; gap: 12px; }
 .engine-run { padding: 20px; border: 1px solid #dfe5e9; border-radius: 9px; background: white; display: grid; gap: 16px; }
-.engine-run > header { display: grid; grid-template-columns: 1fr auto auto auto; gap: 22px; align-items: start; padding-bottom: 14px; border-bottom: 1px solid #edf0f2; }
+.engine-run > header { display: grid; grid-template-columns: 1fr auto auto; gap: 22px; align-items: start; padding-bottom: 14px; border-bottom: 1px solid #edf0f2; }
 .engine-run > header > div:first-child { display: grid; gap: 3px; }
 .engine-run > header strong { font-size: 12px; }
 .engine-run > header small { color: #84909d; font-size: 8px; word-break: break-all; }
@@ -647,6 +647,13 @@ td { height: 70px; font-size: 12px; }
 .engine-unmeasured-tag { padding: 3px 0; border-radius: 4px; background: #eef1f4; color: #6d7885; text-align: center; font-size: 8px; font-weight: 850; text-transform: uppercase; letter-spacing: .05em; }
 .engine-unmeasured strong { display: block; font-size: 10px; color: #40505f; }
 .engine-unmeasured small { color: #7b8794; font-size: 8px; line-height: 1.5; }
+
+.engine-diagnostics { padding: 14px 16px; border: 1px solid #e6ebee; border-radius: 7px; background: #fbfcfd; }
+.engine-diagnostics dl { margin: 8px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; }
+.engine-diagnostics dt { color: #84909d; font-size: 8px; font-weight: 850; text-transform: uppercase; letter-spacing: .06em; }
+.engine-diagnostics dd { margin: 2px 0 0; color: #40505f; font-size: 9px; font-variant-numeric: tabular-nums; }
+.engine-blocked { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.engine-blocked li { color: #93372f; font-size: 8px; font-variant-numeric: tabular-nums; }
 
 .engine-findings { display: grid; gap: 10px; }
 .engine-findings article { padding: 14px 16px; border: 1px solid #e6ebee; border-radius: 7px; }

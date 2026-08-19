@@ -26,6 +26,11 @@ export const leads = sqliteTable("leads", {
   googleNapConsistent: integer("google_nap_consistent", { mode: "boolean" }).notNull().default(false),
   googleReviewedAt: text("google_reviewed_at"),
   score: integer("score").notNull().default(0),
+  // Provenance for the headline score. Two rubrics can write it while the
+  // legacy path is still shipping, so a stored number always says where it
+  // came from and how much of its own rubric was verified.
+  scoreSource: text("score_source").notNull().default(""),
+  scoreConfidence: integer("score_confidence").notNull().default(0),
   visibilityScore: integer("visibility_score").notNull().default(0),
   conversionScore: integer("conversion_score").notNull().default(0),
   technicalScore: integer("technical_score").notNull().default(0),

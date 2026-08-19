@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditRunModules, auditRuns, findings as findingsTable, leads, rawPayloads } from "@/db/schema";
 import { auditModules, missingRequirements, moduleById } from "@/lib/audit/registry";
@@ -6,6 +6,10 @@ import { backoffSeconds, categoryWeights, clampScore, confidenceOf, minimumConfi
 import { runtimeValue } from "@/lib/runtime-env";
 import { collectTechnical } from "@/lib/audit/collect-technical";
 import { analyzeTechnical } from "@/lib/audit/analyze-technical";
+import { collectServiceLines } from "@/lib/audit/collect-service-lines";
+import { analyzeServiceLines } from "@/lib/audit/analyze-service-lines";
+import { collectGoogle } from "@/lib/audit/collect-google";
+import { analyzeGooglePresence } from "@/lib/audit/analyze-google";
 
 export type ModuleOutcome = {
   status: "Complete" | "Skipped" | "Failed" | "Unreachable" | "Retrying";
@@ -59,13 +63,23 @@ export type StoredPayload = {
 /** Returns today's stored payload for a request key, or null to go fetch it. */
 export type CacheLookup = (requestKey: string) => Promise<StoredPayload | null>;
 
-const collectors: Record<string, (website: string, keys: Record<string, string>, cached: CacheLookup) => Promise<{
+/** What a collector is given: the target plus the prospect record behind it. */
+export type CollectContext = {
+  website: string;
+  lead: Record<string, unknown>;
+};
+
+export type CollectResult = {
   payloads: StoredPayload[];
   costCents: number;
   networkCalls: number;
-  keyed: boolean;
-}>> = {
+  keyed?: boolean;
+};
+
+const collectors: Record<string, (context: CollectContext, keys: Record<string, string>, cached: CacheLookup) => Promise<CollectResult>> = {
   technical: collectTechnical,
+  "service-lines": collectServiceLines,
+  google: collectGoogle,
 };
 
 type RawAnalysis = {
@@ -75,8 +89,17 @@ type RawAnalysis = {
   message: string;
 };
 
-const analyzers: Record<string, (payloads: StoredPayload[]) => RawAnalysis> = {
-  technical: analyzeTechnical,
+/**
+ * Analyzers are untyped JS modules and may return module-specific extras the
+ * runner does not read. The cast is safe because normalizeAnalysis validates
+ * severity and status at runtime before anything is stored.
+ */
+type Analyzer = (payloads: StoredPayload[]) => RawAnalysis;
+
+const analyzers: Record<string, Analyzer> = {
+  technical: analyzeTechnical as Analyzer,
+  "service-lines": analyzeServiceLines as Analyzer,
+  google: analyzeGooglePresence as Analyzer,
 };
 
 function isSeverity(value: string): value is Severity {
@@ -113,7 +136,7 @@ function toIso(value: string | null | undefined) {
 
 /** Keys a module might need, read once per tick from the worker environment. */
 async function availableKeys() {
-  const names = ["PAGESPEED_API_KEY", "GOOGLE_PLACES_API_KEY", "SERP_API_KEY", "SERP_PROVIDER", "OPENAI_API_KEY"];
+  const names = ["PAGESPEED_API_KEY", "GOOGLE_PLACES_API_KEY", "OPENAI_API_KEY"];
   const values = await Promise.all(names.map((name) => runtimeValue(name)));
   return Object.fromEntries(names.map((name, index) => [name, values[index]]));
 }
@@ -215,7 +238,7 @@ async function storePayloads(runId: number, moduleId: string, payloads: StoredPa
   return { ids, reused };
 }
 
-async function runModule(runId: number, moduleId: string, website: string, attempts: number, maxAttempts: number): Promise<ModuleOutcome> {
+async function runModule(runId: number, moduleId: string, context: CollectContext, attempts: number, maxAttempts: number): Promise<ModuleOutcome> {
   const definition = moduleById(moduleId);
   if (!definition) {
     return { status: "Failed", message: `Unknown module ${moduleId}.`, findings: [], checks: [], costCents: 0, payloadIds: [] };
@@ -238,7 +261,7 @@ async function runModule(runId: number, moduleId: string, website: string, attem
 
   let collected;
   try {
-    collected = await collect(website, keys, cacheLookupFor());
+    collected = await collect(context, keys, cacheLookupFor());
   } catch (error) {
     // A collector that throws is a module failure, never a run failure.
     return {
@@ -320,7 +343,8 @@ export async function tickAuditRun(runId: number) {
     return finalizeRun(runId);
   }
 
-  const outcome = await runModule(runId, claimed.module, run.website, claimed.attempts, claimed.maxAttempts);
+  const [leadRow] = await db.select().from(leads).where(eq(leads.id, run.leadId)).limit(1);
+  const outcome = await runModule(runId, claimed.module, { website: run.website, lead: leadRow ?? {} }, claimed.attempts, claimed.maxAttempts);
 
   // A retryable failure goes back on the queue rather than ending the module.
   if (outcome.status === "Retrying") {
@@ -428,6 +452,18 @@ async function finalizeRun(runId: number) {
   const incomplete = moduleRows.some((row) => ["Skipped", "Failed", "Unreachable"].includes(row.status));
   const allFailed = moduleRows.every((row) => ["Failed", "Unreachable"].includes(row.status));
 
+  // Each module numbers its own findings, so the run-level list has to be
+  // re-ranked or the top of a report is whatever the first module found.
+  const runFindings = await db.select().from(findingsTable).where(eq(findingsTable.runId, runId));
+  const ranked = orderFindings(runFindings.map((finding) => ({
+    ...finding,
+    severity: finding.severity as "High" | "Medium" | "Low",
+  })));
+  for (const finding of ranked) {
+    await db.update(findingsTable).set({ sortOrder: finding.sortOrder, priority: finding.priority })
+      .where(eq(findingsTable.id, finding.id));
+  }
+
   const underMeasuredNote = `Only ${confidence}% of the audit rubric could be verified (${checksVerified} of ${checks.length} checks), below the ${minimumConfidence}% needed to report a score. Configure PAGESPEED_API_KEY, or re-run when the unavailable sources respond.`;
 
   const [run] = await db.update(auditRuns).set({
@@ -453,6 +489,8 @@ async function finalizeRun(runId: number) {
   if (overall !== null) {
     await db.update(leads).set({
       score: overall,
+      scoreSource: "engine",
+      scoreConfidence: confidence,
       technicalScore: subscores.Technical ?? sql`${leads.technicalScore}`,
       lastAuditAt: sql`CURRENT_TIMESTAMP`,
       updatedAt: sql`CURRENT_TIMESTAMP`,
@@ -468,6 +506,21 @@ export async function summarizeRun(runId: number) {
   if (!run) throw new Error("Audit run not found.");
   const modules = await db.select().from(auditRunModules).where(eq(auditRunModules.runId, runId)).orderBy(auditRunModules.sortOrder);
   const runFindings = await db.select().from(findingsTable).where(eq(findingsTable.runId, runId)).orderBy(findingsTable.sortOrder);
+
+  // Crawl diagnostics ride along on every run, which is how the blocking-rate
+  // question gets answered from real audits instead of a separate endpoint.
+  const payloadIds = modules.flatMap((module) => {
+    try { return JSON.parse(module.payloadIds) as number[]; } catch { return []; }
+  });
+  let diagnostics: unknown = null;
+  if (payloadIds.length) {
+    const [crawlRow] = await db.select().from(rawPayloads)
+      .where(and(inArray(rawPayloads.id, payloadIds), eq(rawPayloads.source, "crawl")))
+      .orderBy(desc(rawPayloads.id)).limit(1);
+    if (crawlRow) {
+      try { diagnostics = (JSON.parse(crawlRow.payload) as { diagnostics?: unknown }).diagnostics ?? null; } catch { diagnostics = null; }
+    }
+  }
   const pending = modules.some((module) => module.status === "Queued" || module.status === "Running");
-  return { run, modules, findings: runFindings, pending, justFinished: false, waitingFor: null as string | null, waitingReason: "" };
+  return { run, modules, findings: runFindings, diagnostics, pending, justFinished: false, waitingFor: null as string | null, waitingReason: "" };
 }

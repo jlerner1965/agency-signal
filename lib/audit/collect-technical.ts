@@ -1,6 +1,6 @@
 import { safeAuditUrl } from "@/lib/website-inspection";
 import { costOf } from "@/lib/audit/cost-config";
-import type { CacheLookup, StoredPayload } from "@/lib/audit/runner";
+import type { CacheLookup, CollectContext, StoredPayload } from "@/lib/audit/runner";
 
 const USER_AGENT = "AgencySignal-Audit/4.0 (+https://agencysignal.app/crawler)";
 const FETCH_TIMEOUT_MS = 20_000;
@@ -84,8 +84,8 @@ async function fetchPageSpeed(url: string, strategy: "mobile" | "desktop", apiKe
   }
 }
 
-export async function collectTechnical(website: string, keys: Record<string, string>, cached: CacheLookup) {
-  const requested = safeAuditUrl(website);
+export async function collectTechnical(context: CollectContext, keys: Record<string, string>, cached: CacheLookup) {
+  const requested = safeAuditUrl(context.website);
   const target = requested.toString();
   const payloads: StoredPayload[] = [];
   let networkCalls = 0;
