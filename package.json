@@ -16,7 +16,9 @@
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
-    "db:migrate": "bash scripts/sites-env.sh -- node scripts/db-migrate.mjs"
+    "db:migrate": "bash scripts/sites-env.sh -- node scripts/db-migrate.mjs",
+    "db:migrate:remote": "bash scripts/sites-env.sh -- node scripts/db-migrate.mjs --remote",
+    "deploy": "bash scripts/sites-env.sh -- node scripts/deploy-cloudflare.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
