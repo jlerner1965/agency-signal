@@ -12,11 +12,13 @@
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
     "build": "bash scripts/build-verified.sh",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "deploy": "node scripts/deploy-cloudflare.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
-    "db:migrate": "bash scripts/sites-env.sh -- node scripts/db-migrate.mjs"
+    "db:migrate": "bash scripts/sites-env.sh -- node scripts/db-migrate.mjs",
+    "db:migrate:remote": "node scripts/db-migrate.mjs --remote"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

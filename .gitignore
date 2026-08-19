@@ -47,3 +47,6 @@ next-env.d.ts
 
 # typescript incremental build cache
 tsconfig.tsbuildinfo
+
+# Written by npm run deploy: the account-specific Cloudflare resource ids.
+.cloudflare.json

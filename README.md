@@ -137,6 +137,35 @@ stored. Re-run `npm run auth:credentials` to rotate the login or add a key later
 | `GOOGLE_PLACES_API_KEY` | Reading the Google Business Profile | Billed per request; the field mask is pinned in code because Google bills by SKU tier. Without it the gap table cannot be built. |
 | `OPENAI_API_KEY` | Optional. Writes recommendation rationale prose. | Per token. Without it the rationale is assembled from the findings themselves. |
 
+## Deploying to Cloudflare
+
+Local development is enough to run audits, but the report and proposal links
+are meant to be sent. `http://localhost:5173/proposal/…` only opens on the
+machine running it, so anything you intend a prospect to read needs a
+deployed address.
+
+```bash
+npx wrangler login   # once, opens a browser
+npm run deploy
+```
+
+`npm run deploy` is safe to re-run and does the whole sequence: finds or
+creates the D1 database, records its id in the git-ignored `.cloudflare.json`,
+pushes the values from `.dev.vars` as Worker secrets, builds, applies the
+migrations to the deployed database, and uploads. On a first deploy the Worker
+does not exist yet, so secrets are pushed after the initial upload and it
+deploys a second time.
+
+The URL is printed at the end — `https://agency-signal.<your-subdomain>.workers.dev`.
+Sign in with the same email and password as locally. Override the names with
+`AGENCYSIGNAL_WORKER_NAME` and `AGENCYSIGNAL_D1_NAME` if either is taken.
+
+The local and deployed databases are separate. Prospects added locally do not
+appear on the deployed app, and vice versa.
+
+R2 is not provisioned. It only backed screenshots for the retired audit path,
+and every caller returns empty without it.
+
 ### Other commands
 
 ```bash
@@ -145,6 +174,7 @@ npm test             # build plus the full test suite
 npm run lint
 npm run db:generate  # after editing db/schema.ts
 npm run db:migrate   # apply migrations to the local database
+npm run deploy       # ship to Cloudflare (see above)
 ```
 
 The hosted runtime applies the migrations packaged into `dist/.openai/drizzle`
