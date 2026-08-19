@@ -22,7 +22,13 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
       db.insert(activities).values({ leadId: lead.id, activityType: "proposal_viewed", description: `${proposal.title} proposal viewed` }),
     ]);
     return Response.json({
-      proposal: { ...proposal, viewCount: proposal.viewCount + 1, deliverables: JSON.parse(proposal.deliverables) },
+      // Spread first, then the derived fields, or the raw row overwrites them.
+      proposal: {
+        ...proposal,
+        viewCount: proposal.viewCount + 1,
+        deliverables: JSON.parse(proposal.deliverables || "[]"),
+        scopeItems: JSON.parse(proposal.scopeItems || "[]"),
+      },
       lead: { agencyName: lead.agencyName, contactName: lead.contactName, city: lead.city, state: lead.state },
       audit: audit && audit.confidenceScore > 0 ? { score: audit.score, pagesAudited: audit.pagesAudited, confidenceScore: audit.confidenceScore, checksPassed: audit.checksPassed, checksFailed: audit.checksFailed, createdAt: audit.createdAt } : null,
       googleAudit: googleAudit.reviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,

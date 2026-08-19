@@ -1,5 +1,5 @@
 import { desc } from "drizzle-orm";
-import { getDb } from "@/db";
+import { describeDbError, getDb } from "@/db";
 import { activities, leads } from "@/db/schema";
 import { prepareLeadData } from "@/lib/server-data";
 import { requireDashboardApi } from "@/app/dashboard-auth";
@@ -17,8 +17,7 @@ export async function GET() {
     const rows = await db.select().from(leads).orderBy(desc(leads.updatedAt));
     return Response.json({ leads: rows });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load leads";
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ error: describeDbError(error, "Unable to load leads") }, { status: 500 });
   }
 }
 
@@ -60,7 +59,6 @@ export async function POST(request: Request) {
     await db.insert(activities).values({ leadId: lead.id, activityType: "lead_added", description: "Business added to the pipeline" });
     return Response.json({ lead }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create lead";
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ error: describeDbError(error, "Unable to create lead") }, { status: 500 });
   }
 }

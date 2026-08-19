@@ -1,0 +1,122 @@
+{
+  "_comment": "Lerner Works pricing. Bands are keyed to audit severity. The generator selects one band per triggered deliverable and must never emit a figure absent from this file.",
+  "version": 1,
+  "currency": "USD",
+  "display_mode": "starts_at",
+  "_display_mode_options": "starts_at | firm | range — 'starts_at' prints the band minimum only; 'firm' prints a single number; 'range' prints min-max.",
+
+  "hourly": {
+    "label": "Hourly, for work outside a fixed scope",
+    "min": 110,
+    "max": 175
+  },
+
+  "minimum_engagement": 800,
+
+  "deliverables": {
+    "site_rebuild": {
+      "label": "Website rebuild",
+      "triggered_by": "technical_audit",
+      "bands": {
+        "light": {
+          "criteria": "5-10 pages, structure sound, needs design and copy refresh",
+          "min": 4500,
+          "max": 6500
+        },
+        "standard": {
+          "criteria": "11-20 pages, or structural rework plus rebuild",
+          "min": 9000,
+          "max": 15000
+        },
+        "heavy": {
+          "criteria": "20+ pages, booking or intake flow, multi-location",
+          "min": 15000,
+          "max": 24000
+        }
+      }
+    },
+
+    "landing_page": {
+      "label": "Single landing page",
+      "triggered_by": "technical_audit",
+      "bands": {
+        "standard": {
+          "criteria": "One page, existing brand, no rebuild needed",
+          "min": 1200,
+          "max": 2500
+        }
+      }
+    },
+
+    "service_page": {
+      "label": "Service page",
+      "triggered_by": "service_line_coverage",
+      "unit": "per_page",
+      "bands": {
+        "standard": {
+          "criteria": "One service offered but not represented on the site",
+          "min": 500,
+          "max": 800
+        }
+      }
+    },
+
+    "technical_fix_pass": {
+      "label": "Technical fix pass",
+      "triggered_by": "technical_audit",
+      "bands": {
+        "light": {
+          "criteria": "Mobile layout or load speed, single root cause",
+          "min": 800,
+          "max": 1200
+        },
+        "standard": {
+          "criteria": "Multiple failures across templates",
+          "min": 1200,
+          "max": 2200
+        }
+      }
+    },
+
+    "gbp_optimization": {
+      "label": "Google Business Profile optimization",
+      "triggered_by": "google_presence",
+      "bands": {
+        "standard": {
+          "criteria": "Categories, hours, service area, photos, service list",
+          "min": 800,
+          "max": 1500
+        }
+      }
+    },
+
+    "local_search_setup": {
+      "label": "Local search setup",
+      "triggered_by": "google_presence",
+      "bands": {
+        "standard": {
+          "criteria": "Citations, structured data, call and form tracking",
+          "min": 1500,
+          "max": 2500
+        }
+      }
+    }
+  },
+
+  "retainer": {
+    "label": "Monthly",
+    "offer_when": "google_presence_gaps_present",
+    "bands": {
+      "light": {
+        "criteria": "Listing upkeep, review responses, monthly report",
+        "min": 1000,
+        "max": 1500
+      },
+      "standard": {
+        "criteria": "Above plus content and landing pages per month",
+        "min": 1800,
+        "max": 2500
+      }
+    }
+  }
+}

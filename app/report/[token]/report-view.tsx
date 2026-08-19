@@ -2,10 +2,12 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import type { Finding, Opportunity, PublicReportLead } from "@/lib/types";
+import EngineReport, { type EngineReport as EngineReportData } from "./engine-report";
 
-type ReportPayload = { lead: PublicReportLead; findings: Finding[]; opportunity: Opportunity; audit: { pagesAudited: number; confidenceScore: number; checksPassed: number; checksFailed: number; checksUnverified: number; screenshotKey: string; createdAt: string } | null; auditComparison: { scoreDelta: number; resolved: string[]; regressed: string[] } | null; competitors: Array<{ id: number; name: string; website: string; score: number; visibilityScore: number; conversionScore: number; technicalScore: number; trustScore: number; confidenceScore: number; pagesAudited: number; screenshotKey: string }> };
+type ReportPayload = { lead: PublicReportLead; findings: Finding[]; opportunity: Opportunity; audit: { pagesAudited: number; confidenceScore: number; checksPassed: number; checksFailed: number; checksUnverified: number; screenshotKey: string; createdAt: string } | null; auditComparison: { scoreDelta: number; resolved: string[]; regressed: string[] } | null; competitors: Array<{ id: number; name: string; website: string; score: number; visibilityScore: number; conversionScore: number; technicalScore: number; trustScore: number; confidenceScore: number; pagesAudited: number; screenshotKey: string }>; engine: EngineReportData | null };
 
-export default function ReportView({ token }: { token: string }) {
+export default function ReportView({ token, ownerName }: { token: string; ownerName: string }) {
+  const ownerFirstName = ownerName.split(/\s+/)[0];
   const [payload, setPayload] = useState<ReportPayload | null>(null);
   const [error, setError] = useState("");
   const [requestState, setRequestState] = useState<"idle" | "sending" | "sent">("idle");
@@ -60,8 +62,45 @@ export default function ReportView({ token }: { token: string }) {
     );
   }
 
-  const { lead, findings, opportunity, audit, auditComparison, competitors } = payload;
+  const { lead, findings, opportunity, audit, auditComparison, competitors, engine } = payload;
   const scoreLabel = lead.score < 55 ? "Needs attention" : lead.score < 70 ? "Opportunity identified" : "Solid foundation";
+
+  // A finished engine run is authoritative. The legacy sections below remain
+  // only until that path retires.
+  if (engine) {
+    return (
+      <main className="report-shell">
+        <header className="report-nav"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><span className="confidential">Private digital opportunity brief</span></header>
+        <section className="report-hero">
+          <div className="report-container report-hero-grid">
+            <div>
+              <p className="eyebrow">Prepared for {lead.contactName || lead.agencyName}</p>
+              <h1>{lead.agencyName}<br /><span>Digital Opportunity Brief</span></h1>
+              <p className="report-intro">A review of what this business publicly sells, what its Google presence represents, and where the two do not match.</p>
+            </div>
+          </div>
+        </section>
+        <EngineReport report={engine} businessName={lead.agencyName} />
+        <section className="report-cta"><div className="report-container report-cta-inner">
+          <div>
+            <p className="eyebrow">Recommended next step</p>
+            <h2>Review the findings together in 15 minutes.</h2>
+            <p>I&rsquo;ll explain which changes are worth prioritising, what can be fixed quickly, and where a larger rebuild would actually be justified.</p>
+          </div>
+          {requestState === "sent"
+            ? <div className="request-success" role="status"><strong>Request received.</strong><span>{ownerFirstName} will follow up using the email you provided.</span></div>
+            : <form className="review-form" onSubmit={requestReview}>
+                <label>Your name<input name="name" autoComplete="name" required /></label>
+                <label>Email<input name="email" type="email" autoComplete="email" required /></label>
+                <label className="span-two">What would you like to discuss?<textarea name="message" rows={3} placeholder="Optional" /></label>
+                {requestError && <p className="form-error">{requestError}</p>}
+                <button className="report-primary span-two" disabled={requestState === "sending"}>{requestState === "sending" ? "Sending…" : "Request a review"}</button>
+              </form>}
+        </div></section>
+        <footer className="report-footer"><div className="report-container"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><p>Evidence-led digital opportunity briefs for growing businesses.</p><span>Prepared by {ownerName}</span></div></footer>
+      </main>
+    );
+  }
   return (
     <main className="report-shell">
       <header className="report-nav"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><span className="confidential">Private digital opportunity brief</span></header>
@@ -82,8 +121,8 @@ export default function ReportView({ token }: { token: string }) {
       {competitors.length > 0 && <section className="report-competitors"><div className="report-container"><div className="report-section-heading compact"><p className="eyebrow">Competitive benchmark</p><h2>How the website compares with alternatives.</h2><p>Each website was reviewed with the same evidence model. This comparison does not claim search position or business quality.</p></div><div className="report-competitor-grid"><article className="primary"><span>Your website</span><h3>{lead.agencyName}</h3><strong>{lead.score}</strong><div><small>Visibility {lead.visibilityScore}</small><small>Conversion {lead.conversionScore}</small><small>Technical {lead.technicalScore}</small><small>Trust {lead.trustScore}</small></div></article>{competitors.map((item) => <article key={item.id}>{item.screenshotKey && <img src={`/api/audit-screenshots/${item.screenshotKey}`} alt={`Rendered mobile page for ${item.name}`} />}<span>Competitor</span><h3>{item.name}</h3><strong>{item.score}</strong><div><small>Visibility {item.visibilityScore}</small><small>Conversion {item.conversionScore}</small><small>Technical {item.technicalScore}</small><small>Trust {item.trustScore}</small></div></article>)}</div></div></section>}
       <section className="report-opportunity"><div className="report-container report-opportunity-grid"><div><p className="eyebrow">Recommended implementation path</p><h2>{opportunity.recommendedOffer}</h2><p>{opportunity.expectedOutcome}</p></div><div className="report-offer-card"><span>Primary opportunity</span><strong>{opportunity.primaryService}</strong><p>{opportunity.primaryFinding}</p><small>{opportunity.scope}</small></div></div></section>
       <section className="findings-section"><div className="report-container"><div className="report-section-heading compact"><p className="eyebrow">Detailed findings</p><h2>What we found—and what to do next.</h2><p>{findings.length} evidence-backed improvement{findings.length === 1 ? "" : "s"}, ordered by severity.</p></div><div className="findings-list">{findings.map((finding, index) => <article className="finding-card" key={`${finding.title}-${index}`}><div className="finding-index">{String(index + 1).padStart(2, "0")}</div><div className="finding-main"><div className="finding-tags"><span>{finding.category}</span><span className={`severity ${finding.severity.toLowerCase()}`}>{finding.severity} priority</span></div><h3>{finding.title}</h3><div className="finding-columns"><div><h4>Evidence</h4><p>{finding.evidence}</p></div><div><h4>Recommended change</h4><p>{finding.recommendation}</p></div><div><h4>Why it matters</h4><p>{finding.impact}</p></div></div><a href={finding.affectedUrl} target="_blank" rel="noreferrer">Audited page ↗</a></div></article>)}</div></div></section>
-      <section className="report-cta"><div className="report-container report-cta-inner"><div><p className="eyebrow">Recommended next step</p><h2>Review the findings together in 15 minutes.</h2><p>I’ll explain which changes are worth prioritizing, what can be fixed quickly and where a larger redesign would actually be justified.</p></div>{requestState === "sent" ? <div className="request-success" role="status"><strong>Request received.</strong><span>James will follow up using the email you provided.</span></div> : <form className="review-form" onSubmit={requestReview}><label>Your name<input name="name" autoComplete="name" required /></label><label>Email<input name="email" type="email" autoComplete="email" required /></label><label className="span-two">What would you like to discuss?<textarea name="message" rows={3} placeholder="Optional" /></label>{requestError && <p className="form-error">{requestError}</p>}<button className="report-primary span-two" disabled={requestState === "sending"}>{requestState === "sending" ? "Sending…" : "Request a review"}</button></form>}</div></section>
-      <footer className="report-footer"><div className="report-container"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><p>Evidence-led digital opportunity briefs for growing businesses.</p><span>Prepared by James Lerner</span></div></footer>
+      <section className="report-cta"><div className="report-container report-cta-inner"><div><p className="eyebrow">Recommended next step</p><h2>Review the findings together in 15 minutes.</h2><p>I’ll explain which changes are worth prioritizing, what can be fixed quickly and where a larger redesign would actually be justified.</p></div>{requestState === "sent" ? <div className="request-success" role="status"><strong>Request received.</strong><span>{ownerFirstName} will follow up using the email you provided.</span></div> : <form className="review-form" onSubmit={requestReview}><label>Your name<input name="name" autoComplete="name" required /></label><label>Email<input name="email" type="email" autoComplete="email" required /></label><label className="span-two">What would you like to discuss?<textarea name="message" rows={3} placeholder="Optional" /></label>{requestError && <p className="form-error">{requestError}</p>}<button className="report-primary span-two" disabled={requestState === "sending"}>{requestState === "sending" ? "Sending…" : "Request a review"}</button></form>}</div></section>
+      <footer className="report-footer"><div className="report-container"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><p>Evidence-led digital opportunity briefs for growing businesses.</p><span>Prepared by {ownerName}</span></div></footer>
     </main>
   );
 }

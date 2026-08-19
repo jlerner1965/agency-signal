@@ -39,7 +39,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
       const rows = (payload.leads ?? []) as Lead[];
       setLeads(rows); setDataMode("live");
       if (preferredId) setSelectedId(preferredId);
-    } catch { setDataMode("error"); }
+    } catch (error) { setDataMode("error"); setToast(error instanceof Error ? error.message : "Unable to load businesses"); }
   }
 
   useEffect(() => { loadLeads(); }, []);
@@ -91,15 +91,40 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
     finally { setBusy(false); }
   }
 
+  /**
+   * One scoring path: the module engine. The run is created and then advanced a
+   * module at a time, waiting out any backoff the runner asks for.
+   */
   async function runAudit() {
     if (!selected || busy) return;
-    setBusy(true); setToast("Reviewing the live website and mobile experience…");
+    setBusy(true); setToast("Starting the audit run…");
     try {
-      const response = await fetch("/api/audit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: selected.id, website: selected.website }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Audit failed");
-      replaceLead(payload.lead); setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.pagesAudited ?? 1); setAuditSummary(payload.audit ?? null); await loadDetail(selected.id); setToast(`${payload.pagesAudited}-page evidence audit complete · score ${payload.lead.score}`);
-    } catch (error) { setToast(error instanceof Error ? error.message : "Audit could not be completed"); }
+      const created = await fetch("/api/audit-runs", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ leadId: selected.id }),
+      });
+      const start = await created.json();
+      if (!created.ok) throw new Error(start.error || "The audit run could not be started.");
+
+      let summary = start;
+      for (let step = 0; step < 40 && summary.pending; step += 1) {
+        const ticked = await fetch(`/api/audit-runs/${start.run.id}/tick`, { method: "POST" });
+        summary = await ticked.json();
+        if (!ticked.ok) throw new Error(summary.error || "The audit run failed.");
+        const done = summary.modules.filter((module: { status: string }) => module.status !== "Queued" && module.status !== "Running").length;
+        setToast(`Auditing — ${done} of ${summary.modules.length} modules complete…`);
+        if (summary.pending && summary.waitingFor) {
+          const waitMs = Math.min(Math.max(0, new Date(summary.waitingFor).getTime() - Date.now()), 65_000);
+          if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs + 400));
+        }
+      }
+
+      await loadLeads();
+      await loadDetail(selected.id);
+      setToast(summary.run.overallScore === null
+        ? `Audit finished without a score — ${summary.run.error || "too little could be verified"}`
+        : `Audit complete · score ${summary.run.overallScore} at ${summary.run.confidence}% verified`);
+    } catch (error) { setToast(error instanceof Error ? error.message : "The audit could not be completed"); }
     finally { setBusy(false); }
   }
 
@@ -134,11 +159,11 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
   async function signOut() { await fetch("/api/auth/logout", { method: "POST" }); window.location.assign("/login"); }
 
   return <main className="presence-app">
-    <aside className="presence-sidebar"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><nav><button className="active"><span>◎</span> Audit workspace</button></nav><div className="presence-workflow"><span>Simple workflow</span><ol><li><b>1</b>Add a business</li><li><b>2</b>Audit website</li><li><b>3</b>Review Google presence</li><li><b>4</b>Create proposal</li></ol></div><div className="presence-user"><span className="avatar">JL</span><div><strong>{ownerName}</strong><small>Owner</small></div><button onClick={signOut} aria-label="Sign out">↗</button></div></aside>
+    <aside className="presence-sidebar"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><nav><button className="active"><span>◎</span> Audit workspace</button></nav><div className="presence-workflow"><span>Simple workflow</span><ol><li><b>1</b>Add a business</li><li><b>2</b>Audit website</li><li><b>3</b>Review Google presence</li><li><b>4</b>Create proposal</li></ol></div><div className="presence-user"><span className="avatar">{initials(ownerName)}</span><div><strong>{ownerName}</strong><small>Owner</small></div><button onClick={signOut} aria-label="Sign out">↗</button></div></aside>
     <section className="presence-main"><header className="presence-topbar"><label><span>⌕</span><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search businesses" aria-label="Search businesses" />{query && <button onClick={() => setQuery("")} aria-label="Clear search">×</button>}</label><div><span className={`sync-state ${dataMode}`}><i />{dataMode === "live" ? "Saved" : dataMode === "loading" ? "Loading" : "Connection issue"}</span><button className="secondary-button" onClick={() => setShowImport(true)}>Import CSV</button><button className="primary-button" onClick={() => setShowAdd(true)}>+ Add business</button></div></header>
       <div className="presence-content"><section className="presence-intro"><div><p className="eyebrow">Digital presence intelligence</p><h1>Audit. Explain. Propose.</h1><p>Detailed website and Google-presence reviews that turn visible problems into a clear redesign or optimization proposal.</p></div><button className="primary-button" onClick={() => setShowAdd(true)}>Start a new audit</button></section>
         <section className="presence-metrics" aria-label="Audit summary"><article><span>Businesses</span><strong>{stats.businesses}</strong><small>saved for review</small></article><article><span>Website audits</span><strong>{stats.websiteAudits}</strong><small>multi-page + mobile</small></article><article><span>Google reviews</span><strong>{stats.googleReviews}</strong><small>presence scorecards</small></article><article><span>Proposals</span><strong>{stats.proposals}</strong><small>created and trackable</small></article></section>
-        <section className="business-audit-list"><div className="business-list-head"><div><h2>Business audits</h2><p>{filtered.length} {filtered.length === 1 ? "business" : "businesses"} · select one to open the full audit</p></div></div><div className="business-table-wrap"><table><thead><tr><th>Business</th><th>Website</th><th>Google presence</th><th>Proposal</th><th></th></tr></thead><tbody>{filtered.map((lead) => { const google = buildGooglePresenceAudit(lead); return <tr key={lead.id} onClick={() => chooseLead(lead)}><td><div className="agency-cell"><span className="agency-avatar">{initials(lead.agencyName)}</span><span><strong>{lead.agencyName}</strong><small>{lead.carrier}{lead.city ? ` · ${lead.city}${lead.state ? `, ${lead.state}` : ""}` : ""}</small></span></div></td><td>{lead.score ? <div className="audit-table-score"><span className={scoreTone(lead.score)}>{lead.score}</span><div><strong>{scoreTone(lead.score) === "good" ? "Strong" : scoreTone(lead.score) === "watch" ? "Needs work" : "Priority gaps"}</strong><small>{formatDate(lead.lastAuditAt)}</small></div></div> : <span className="audit-not-started">Not audited</span>}</td><td>{google.reviewed ? <div className="audit-table-score"><span className={scoreTone(google.score)}>{google.score}</span><div><strong>{scoreTone(google.score) === "good" ? "Strong" : scoreTone(google.score) === "watch" ? "Needs work" : "Priority gaps"}</strong><small>{formatDate(lead.googleReviewedAt)}</small></div></div> : <span className="audit-not-started">Not reviewed</span>}</td><td>{["Proposal sent", "Decision pending", "Won"].includes(lead.status) ? <span className="proposal-ready">Proposal ready</span> : <span className="audit-not-started">Not created</span>}</td><td><button className="review-business" onClick={(event) => { event.stopPropagation(); chooseLead(lead); }}>Review →</button></td></tr>; })}</tbody></table>{!filtered.length && <div className="simple-empty"><strong>{leads.length ? "No businesses match your search." : "Add your first business."}</strong><p>{leads.length ? "Clear the search and try again." : "You only need a business name and website to begin."}</p>{!leads.length && <button className="primary-button" onClick={() => setShowAdd(true)}>Add business</button>}</div>}</div></section>
+        <section className="business-audit-list"><div className="business-list-head"><div><h2>Business audits</h2><p>{filtered.length} {filtered.length === 1 ? "business" : "businesses"} · select one to open the full audit</p></div></div><div className="business-table-wrap"><table><thead><tr><th>Business</th><th>Website</th><th>Google presence</th><th>Proposal</th><th></th></tr></thead><tbody>{filtered.map((lead) => { const google = buildGooglePresenceAudit(lead); return <tr key={lead.id} onClick={() => chooseLead(lead)}><td><div className="agency-cell"><span className="agency-avatar">{initials(lead.agencyName)}</span><span><strong>{lead.agencyName}</strong><small>{lead.carrier}{lead.city ? ` · ${lead.city}${lead.state ? `, ${lead.state}` : ""}` : ""}</small></span></div></td><td>{lead.score ? <div className="audit-table-score"><span className={scoreTone(lead.score)}>{lead.score}</span><div><strong>{scoreTone(lead.score) === "good" ? "Strong" : scoreTone(lead.score) === "watch" ? "Needs work" : "Priority gaps"}</strong><small>{formatDate(lead.lastAuditAt)}{lead.scoreConfidence ? ` · ${lead.scoreConfidence}% verified` : ""}</small></div></div> : <span className="audit-not-started">Not audited</span>}</td><td>{google.reviewed ? <div className="audit-table-score"><span className={scoreTone(google.score)}>{google.score}</span><div><strong>{scoreTone(google.score) === "good" ? "Strong" : scoreTone(google.score) === "watch" ? "Needs work" : "Priority gaps"}</strong><small>{formatDate(lead.googleReviewedAt)}</small></div></div> : <span className="audit-not-started">Not reviewed</span>}</td><td>{["Proposal sent", "Decision pending", "Won"].includes(lead.status) ? <span className="proposal-ready">Proposal ready</span> : <span className="audit-not-started">Not created</span>}</td><td><button className="review-business" onClick={(event) => { event.stopPropagation(); chooseLead(lead); }}>Review →</button></td></tr>; })}</tbody></table>{!filtered.length && <div className="simple-empty"><strong>{leads.length ? "No businesses match your search." : "Add your first business."}</strong><p>{leads.length ? "Clear the search and try again." : "You only need a business name and website to begin."}</p>{!leads.length && <button className="primary-button" onClick={() => setShowAdd(true)}>Add business</button>}</div>}</div></section>
       </div>
     </section>
     {selected && <button className="detail-backdrop" aria-label="Close business audit" onClick={() => setSelectedId(-1)} />}

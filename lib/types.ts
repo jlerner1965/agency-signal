@@ -35,6 +35,8 @@ export type Lead = {
   googleNapConsistent: boolean;
   googleReviewedAt: string | null;
   score: number;
+  scoreSource: string;
+  scoreConfidence: number;
   visibilityScore: number;
   conversionScore: number;
   technicalScore: number;

@@ -11,7 +11,8 @@ type Payload = {
   findings: { title: string; evidence: string; recommendation: string; category: string; severity: string }[];
 };
 
-export default function ProposalView({ token }: { token: string }) {
+export default function ProposalView({ token, ownerName }: { token: string; ownerName: string }) {
+  const ownerFirstName = ownerName.split(/\s+/)[0];
   const [payload, setPayload] = useState<Payload | null>(null);
   const [error, setError] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "accepted">("idle");
@@ -45,10 +46,85 @@ export default function ProposalView({ token }: { token: string }) {
   return <main className="proposal-shell">
     <header className="proposal-nav"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><div className="proposal-nav-actions"><span>Prepared for {lead.agencyName}</span><button onClick={copyLink}>{copied ? "Copied" : "Copy link"}</button><button className="primary" onClick={() => window.print()}>Print / Save PDF</button></div></header>
     <section className="proposal-hero"><div className="proposal-container"><p className="eyebrow">Digital growth proposal</p><h1>{proposal.title}</h1><p>{proposal.outcome}</p><div className="proposal-summary"><span>Investment<strong>${proposal.price.toLocaleString("en-US")}</strong></span><span>Timeline<strong>{proposal.timeline}</strong></span><span>Valid until<strong>{new Date(proposal.expiresAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong></span></div></div></section>
-    <section className="proposal-container proposal-body"><div><p className="eyebrow">Why this work</p><h2>A focused response to an identified opportunity.</h2><p>{proposal.scope}</p><p>This scope is designed to improve a measurable customer-acquisition outcome without adding work that is not tied to the stated objective.</p></div><aside><span>Recommended service</span><strong>{proposal.service}</strong><small>Prepared by James Lerner</small></aside></section>
+{(() => {
+      const draft = proposal as unknown as { voicePlaceholder?: boolean; pricingPlaceholder?: boolean; openingProse?: string; openingBlocked?: string };
+      const blocked = [
+        draft.pricingPlaceholder ? "The amounts below come from placeholder pricing." : "",
+        draft.voicePlaceholder ? "No opening has been written — config/voice.md is still a placeholder." : "",
+        draft.openingBlocked || "",
+      ].filter(Boolean);
+      return (
+        <>
+          {blocked.length > 0 && (
+            <div className="proposal-stub" role="status">
+              <strong>Draft — not ready to send.</strong>
+              {blocked.map((reason) => <span key={reason}>{reason}</span>)}
+            </div>
+          )}
+          {(() => {
+            const scope = (draft as unknown as { scopeItems?: Array<Record<string, string | number>> }).scopeItems ?? [];
+            const retainer = (draft as unknown as { retainer?: string }).retainer;
+            const parsedRetainer = retainer ? JSON.parse(retainer) as { label: string; criteria: string; display: string } : null;
+            if (!scope.length) return null;
+            return (
+              <section className="proposal-container proposal-pricing">
+                <p className="eyebrow">Scope and investment</p>
+                <ul>
+                  {scope.map((item) => (
+                    <li key={String(item.deliverable)}>
+                      <div>
+                        <strong>{item.label}{Number(item.quantity) > 1 ? ` × ${item.quantity}` : ""}</strong>
+                        <small>{item.criteria}</small>
+                        <em>{item.rationale}</em>
+                      </div>
+                      <b>{item.display}</b>
+                    </li>
+                  ))}
+                </ul>
+                <div className="proposal-total">
+                  <span>Total</span>
+                  <b>{(draft as unknown as { priceDisplay?: string }).priceDisplay}</b>
+                  {(draft as unknown as { minimumApplied?: boolean }).minimumApplied && (
+                    <small>The minimum engagement applies.</small>
+                  )}
+                </div>
+                {(() => {
+                  const links = JSON.parse((draft as unknown as { mockupLinks?: string }).mockupLinks || "[]") as Array<{ title: string; url: string }>;
+                  if (!links.length) return null;
+                  return (
+                    <div className="proposal-visuals">
+                      <p className="eyebrow">Concept pages</p>
+                      {links.map((link) => (
+                        <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.title} ↗</a>
+                      ))}
+                    </div>
+                  );
+                })()}
+                {parsedRetainer && (
+                  <div className="proposal-retainer">
+                    <div><strong>{parsedRetainer.label}</strong><small>{parsedRetainer.criteria}</small></div>
+                    <b>{parsedRetainer.display}</b>
+                  </div>
+                )}
+              </section>
+            );
+          })()}
+          {draft.openingProse ? (
+            <section className="proposal-container proposal-opening">
+              {draft.openingProse.split(/\n{2,}/).map((paragraph, index) => (
+                <p key={index}>{paragraph.split("\n").map((line, lineIndex) => (
+                  <span key={lineIndex}>{line}<br /></span>
+                ))}</p>
+              ))}
+            </section>
+          ) : null}
+        </>
+      );
+    })()}
+    <section className="proposal-container proposal-body"><div><p className="eyebrow">Why this work</p><h2>A focused response to an identified opportunity.</h2><p>{proposal.scope}</p><p>This scope is designed to improve a measurable customer-acquisition outcome without adding work that is not tied to the stated objective.</p></div><aside><span>Recommended service</span><strong>{proposal.service}</strong><small>Prepared by {ownerName}</small></aside></section>
     {findings.length > 0 && <section className="proposal-evidence"><div className="proposal-container"><div className="proposal-evidence-head"><div><p className="eyebrow">Audit evidence</p><h2>What the digital presence review found</h2>{audit && <p>{audit.checksPassed} checks passed · {audit.checksFailed} need work · {audit.confidenceScore}/100 evidence confidence</p>}</div><div className="proposal-score-pair">{audit && <div className="proposal-audit-score"><strong>{audit.score}</strong><span>website score<br />{audit.pagesAudited} page{audit.pagesAudited === 1 ? "" : "s"} reviewed</span></div>}{googleAudit && <div className="proposal-audit-score"><strong>{googleAudit.score}</strong><span>Google presence<br />profile scorecard</span></div>}</div></div>{competitors.length > 0 && <div className="proposal-benchmarks"><span>Competitive website benchmark</span>{competitors.map((item) => <article key={item.id}><strong>{item.name}</strong><b>{item.score}/100</b></article>)}</div>}<div className="proposal-evidence-grid">{findings.map((finding, index) => <article key={`${finding.title}-${index}`}><span>{finding.category} · {finding.severity}</span><h3>{finding.title}</h3><p>{finding.evidence}</p><strong>Recommended</strong><p>{finding.recommendation}</p></article>)}</div></div></section>}
     <section className="proposal-deliverables"><div className="proposal-container"><p className="eyebrow">Included</p><h2>Deliverables and implementation</h2><ol>{proposal.deliverables.map((item, index) => <li key={item}><span>0{index + 1}</span><strong>{item}</strong></li>)}</ol></div></section>
-    <section className="proposal-accept"><div className="proposal-container"><div><p className="eyebrow">Decision</p><h2>Approve the project.</h2><p>Submitting acceptance records your approval and contact information. James will follow up with the kickoff details and formal service agreement.</p></div>{state === "accepted" ? <div className="proposal-accepted" role="status"><span>✓</span><strong>Proposal accepted</strong><p>Thank you. The next step is project kickoff and scheduling.</p></div> : <form onSubmit={accept}><label>Authorized name<input name="signerName" required autoComplete="name" defaultValue={lead.contactName} /></label><label>Email<input name="signerEmail" type="email" required autoComplete="email" /></label>{error && <p className="form-error">{error}</p>}<button disabled={state === "sending"}>{state === "sending" ? "Recording acceptance…" : `Accept proposal · $${proposal.price.toLocaleString("en-US")}`}</button><small>Acceptance is recorded with the date, name, and email provided.</small></form>}</div></section>
+    <section className="proposal-accept"><div className="proposal-container"><div><p className="eyebrow">Decision</p><h2>Approve the project.</h2><p>Submitting acceptance records your approval and contact information. {ownerFirstName} will follow up with the kickoff details and formal service agreement.</p></div>{state === "accepted" ? <div className="proposal-accepted" role="status"><span>✓</span><strong>Proposal accepted</strong><p>Thank you. The next step is project kickoff and scheduling.</p></div> : <form onSubmit={accept}><label>Authorized name<input name="signerName" required autoComplete="name" defaultValue={lead.contactName} /></label><label>Email<input name="signerEmail" type="email" required autoComplete="email" /></label>{error && <p className="form-error">{error}</p>}<button disabled={state === "sending"}>{state === "sending" ? "Recording acceptance…" : `Accept proposal · $${proposal.price.toLocaleString("en-US")}`}</button><small>Acceptance is recorded with the date, name, and email provided.</small></form>}</div></section>
     <footer className="proposal-footer"><div className="proposal-container"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><span>Evidence-led digital growth proposals</span></div></footer>
   </main>;
 }

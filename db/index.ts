@@ -11,3 +11,15 @@ export async function getDb() {
 
   return drizzle(env.DB, { schema });
 }
+
+/**
+ * D1 reports a missing schema as a bare SQLite error. Locally that almost
+ * always means the migrations in drizzle/ have not been applied yet.
+ */
+export function describeDbError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : "";
+  if (/no such table/i.test(message)) {
+    return "The database has no tables yet. Run `npm run db:migrate` locally, or redeploy so the hosted runtime applies the migrations in drizzle/.";
+  }
+  return message || fallback;
+}
