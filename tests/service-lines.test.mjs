@@ -49,21 +49,39 @@ test("structured data contributes services a nav might miss", () => {
   assert.ok(names.includes("IV Nutrient Therapy"));
 });
 
-test("every service the site sells but Google omits is a high-severity finding", () => {
-  // Google flattens this clinic to one category. That is the whole premise.
+test("a profile listing nothing is one finding, not one per service", () => {
+  // Google flattens this clinic to one category. Saying that three times over
+  // would overstate it: there is one listing problem, not three.
   const result = analyzeServiceLines(payloads({
     primaryTypeDisplayName: { text: "Medical clinic" },
     types: ["doctor", "health"],
   }));
 
-  const gaps = result.findings.filter((finding) => finding.title.includes("invisible on Google"));
-  assert.equal(gaps.length, 3, "all three service lines are unrepresented");
-  for (const gap of gaps) {
-    assert.equal(gap.severity, "High");
-    assert.match(gap.impactNote, /flattens a multi-service business/);
-    assert.equal(gap.impactScore, 5);
-  }
+  const listing = result.findings.filter((finding) => finding.title === "The Google profile lists no services at all");
+  assert.equal(listing.length, 1);
+  assert.equal(listing[0].severity, "High");
+  assert.match(listing[0].impactNote, /flattens a multi-service business/);
+  assert.deepEqual(result.findings.filter((finding) => /is missing from the Google service list/.test(finding.title)), []);
+
+  // Category fit is its own single finding about the category.
+  const category = result.findings.filter((finding) => /^Categorised as/.test(finding.title));
+  assert.equal(category.length, 1);
+  assert.match(category[0].evidence, /Medical clinic/);
+
   assert.deepEqual(result.serviceLines.map((line) => line.googleRepresented), [false, false, false]);
+});
+
+test("when Google does list services, a missing one is its own finding", () => {
+  const result = analyzeServiceLines(payloads({
+    primaryTypeDisplayName: { text: "Medical clinic" },
+    editorialSummary: { text: "Hormone Therapy, Functional Medicine" },
+  }));
+  const gaps = result.findings.filter((finding) => /is missing from the Google service list/.test(finding.title));
+  assert.equal(gaps.length, 1);
+  assert.match(gaps[0].title, /Medical Aesthetics/);
+  // The finding quotes the site verbatim and names what Google does list.
+  assert.match(gaps[0].evidence, /Medical Aesthetics/);
+  assert.deepEqual(result.findings.filter((finding) => finding.title === "The Google profile lists no services at all"), []);
 });
 
 test("a service Google does represent is not reported as a gap", () => {
@@ -94,14 +112,24 @@ test("a service line with no dedicated page is flagged separately", () => {
   assert.match(orphan.evidence, /Peptide Therapy/);
 });
 
-test("LLM enrichment can add candidates but never removes or re-rates one", () => {
+test("LLM enrichment can add candidates but must cite on the same terms", () => {
   const result = analyzeServiceLines(payloads(null, {
-    enrichment: { services: [{ name: "Peptide Therapy" }, { name: "Read more" }, { name: "Hormone Therapy" }] },
+    enrichment: { services: [
+      { name: "Peptide Therapy", url: "https://clinic.test/services/peptides", quote: "Peptide Therapy for recovery" },
+      { name: "IV Drips" },
+      { name: "Read more", url: "https://clinic.test/x", quote: "Read more" },
+      { name: "Hormone Therapy", url: "https://clinic.test/services/hormone-therapy", quote: "Hormone Therapy" },
+    ] },
   }));
   const names = result.serviceLines.map((line) => line.name);
-  assert.ok(names.includes("Peptide Therapy"), "a genuine new candidate is added");
+  assert.ok(names.includes("Peptide Therapy"), "a candidate that cites a page and its text is added");
+  assert.ok(!names.includes("IV Drips"), "a candidate with no citation is dropped, not trusted");
   assert.ok(!names.includes("Read more"), "boilerplate is rejected by the same filter");
   assert.equal(names.filter((name) => name === "Hormone Therapy").length, 1, "no duplicate of a site-named service");
+  // Everything that survives can point at where it came from.
+  for (const line of result.serviceLines) {
+    assert.ok(line.quote && line.siteUrl, `${line.name} must cite a source`);
+  }
 });
 
 test("an unreadable site yields no coverage verdict at all", () => {
@@ -113,14 +141,25 @@ test("an unreadable site yields no coverage verdict at all", () => {
   assert.match(result.findings[0].impactNote, /missing data, not evidence of poor coverage/);
 });
 
-test("google services are read from category, types and manual entry", () => {
-  const services = extractGoogleServices(
-    { primaryTypeDisplayName: { text: "Wellness center" }, types: ["spa"] },
-    { googlePrimaryCategory: "Functional medicine" },
+test("the profile's category is kept separate from its service list", () => {
+  const google = extractGoogleServices(
+    { primaryTypeDisplayName: { text: "Wellness center" }, types: ["spa", "wellness_center"] },
+    { googleServices: "Massage, Cryotherapy" },
   );
-  const names = services.map((service) => service.name);
-  assert.ok(names.includes("Wellness center"));
-  assert.ok(names.includes("Functional medicine"));
+  // A category is not a service list, and conflating them is what produced the
+  // false per-service gaps.
+  assert.equal(google.category, "Wellness center");
+  const listed = google.listed.map((entry) => entry.name);
+  assert.ok(listed.includes("Massage"));
+  assert.ok(listed.includes("Cryotherapy"));
+  assert.ok(!listed.includes("Wellness center"));
+  assert.ok(google.all.some((entry) => entry.name === "Wellness center"));
+});
+
+test("a profile with no services listed reports an empty list", () => {
+  const google = extractGoogleServices({ primaryTypeDisplayName: { text: "Medical clinic" } }, {});
+  assert.equal(google.category, "Medical clinic");
+  assert.deepEqual(google.listed, []);
 });
 
 test("manual-check fields are listed as not measured until a person enters them", () => {

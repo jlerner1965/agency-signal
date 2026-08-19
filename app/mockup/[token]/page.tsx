@@ -1,0 +1,26 @@
+import { recordMockupView } from "@/lib/audit/deliverables";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * The mockup is the deliverable, served whole at its own stable URL so it can
+ * be sent as a live link. It is rendered as its own document rather than being
+ * embedded, so the prospect's brand CSS cannot collide with the app's.
+ */
+export default async function MockupPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  const mockup = /^[a-f0-9]{32}$/i.test(token) ? await recordMockupView(token) : null;
+
+  if (!mockup) {
+    return <main style={{ font: "16px/1.6 system-ui, sans-serif", maxWidth: "42rem", margin: "12vh auto", padding: "0 1.5rem" }}>
+      <h1 style={{ fontSize: "1.4rem" }}>This mockup link is not valid.</h1>
+      <p>The link may have been replaced by a newer version. Ask for a current one.</p>
+    </main>;
+  }
+
+  return <iframe
+    title={mockup.title}
+    srcDoc={mockup.html}
+    style={{ position: "fixed", inset: 0, width: "100%", height: "100%", border: 0 }}
+  />;
+}

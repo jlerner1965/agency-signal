@@ -53,7 +53,16 @@ const MODULE_TONE: Record<string, string> = {
   Skipped: "neutral", Unreachable: "critical", Failed: "critical",
 };
 
-export default function AuditRunPanel({ leadId }: { leadId: number }) {
+type Deliverables = {
+  recommendations: Array<{ id: number; label: string; rationale: string; rationaleSource: string; findingIds: string }>;
+  proposal: { id: number; token: string; title: string; price: number; timeline: string; version: number; status: string } | null;
+  blockers: string[];
+  mockups: Array<{ kind: string; title: string; url: string }>;
+};
+
+export default function AuditRunPanel({ leadId, reportToken }: { leadId: number; reportToken: string }) {
+  const [deliverables, setDeliverables] = useState<Deliverables>({ recommendations: [], proposal: null, blockers: [], mockups: [] });
+  const [packaging, setPackaging] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [history, setHistory] = useState<Run[]>([]);
   const [busy, setBusy] = useState(false);
@@ -138,6 +147,43 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
       setError(reason instanceof Error ? reason.message : "Unable to load that run.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * The package is built in order: recommendations gate the proposal, and the
+   * mockups need the service lines the run already found.
+   */
+  async function buildPackage(runId: number) {
+    setPackaging("Building recommendations…");
+    setError("");
+    try {
+      const recResponse = await fetch(`/api/audit-runs/${runId}/recommendations`, { method: "POST" });
+      const recPayload = await recResponse.json();
+      if (!recResponse.ok) throw new Error(recPayload.error || "Recommendations failed.");
+
+      setPackaging("Drafting the proposal…");
+      const proposalResponse = await fetch(`/api/audit-runs/${runId}/proposal`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+      });
+      const proposalPayload = await proposalResponse.json();
+      if (!proposalResponse.ok) throw new Error(proposalPayload.error || "Proposal failed.");
+
+      setPackaging("Generating mockups…");
+      const mockupResponse = await fetch(`/api/audit-runs/${runId}/mockups`, { method: "POST" });
+      const mockupPayload = await mockupResponse.json();
+      if (!mockupResponse.ok) throw new Error(mockupPayload.error || "Mockups failed.");
+
+      setDeliverables({
+        recommendations: recPayload.recommendations ?? [],
+        proposal: proposalPayload.proposal ?? null,
+        blockers: proposalPayload.blockers ?? [],
+        mockups: mockupPayload.mockups ?? [],
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The package could not be built.");
+    } finally {
+      setPackaging("");
     }
   }
 
@@ -279,6 +325,53 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {run && summary && !summary.pending && run.overallScore !== null && (
+        <section className="engine-package">
+          <div className="audit-section-intro">
+            <div>
+              <p className="eyebrow">Deliverables</p>
+              <h3>Build the package</h3>
+              <p>Recommendations map from the stored findings by rule; a recommendation that cannot cite one is refused rather than shipped. Nothing here is sent anywhere.</p>
+            </div>
+            <button className="primary-button" disabled={Boolean(packaging)} onClick={() => buildPackage(run.id)}>
+              {packaging || "Build report, proposal and mockups"}
+            </button>
+          </div>
+
+          {deliverables.blockers.length > 0 && (
+            <div className="engine-blockers" role="status">
+              <strong>Not exportable yet</strong>
+              <ul>{deliverables.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+            </div>
+          )}
+
+          {deliverables.recommendations.length > 0 && (
+            <div className="engine-recs">
+              <p className="eyebrow">{deliverables.recommendations.length} recommendations</p>
+              {deliverables.recommendations.map((rec) => (
+                <article key={rec.id}>
+                  <div><strong>{rec.label}</strong><span className="engine-rec-source">{rec.rationaleSource === "model" ? "rationale written by model" : "rationale derived from findings"}</span></div>
+                  <p>{rec.rationale}</p>
+                  <small>Cites findings {JSON.parse(rec.findingIds || "[]").map((id: number) => `F${id}`).join(", ")}</small>
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="engine-links">
+            <a href={`/report/${reportToken}`} target="_blank" rel="noreferrer">Open the client report ↗</a>
+            {deliverables.proposal && (
+              <a href={`/proposal/${deliverables.proposal.token}`} target="_blank" rel="noreferrer">
+                Proposal v{deliverables.proposal.version} · {deliverables.proposal.title} ↗
+              </a>
+            )}
+            {deliverables.mockups.map((mockup) => (
+              <a key={mockup.url} href={mockup.url} target="_blank" rel="noreferrer">{mockup.title} ↗</a>
+            ))}
+          </div>
         </section>
       )}
 

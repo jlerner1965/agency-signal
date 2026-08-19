@@ -1,0 +1,27 @@
+import { requireDashboardApi } from "@/app/dashboard-auth";
+import { buildRunProposal, pricing, voiceSample } from "@/lib/audit/deliverables";
+
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const denied = await requireDashboardApi();
+  if (denied) return denied;
+  const runId = Number((await context.params).id);
+  if (!Number.isInteger(runId)) return Response.json({ error: "Invalid audit run." }, { status: 400 });
+  try {
+    const body = (await request.json().catch(() => ({}))) as { tier?: string };
+    const proposal = await buildRunProposal(runId, body.tier);
+    const config = pricing();
+    const voice = await voiceSample();
+    return Response.json({
+      proposal,
+      tiers: config.tiers,
+      // Nothing is exportable while either input is still a placeholder, and
+      // the reason is stated rather than left for the reader to discover.
+      blockers: [
+        config.placeholder ? "config/pricing.json still holds placeholder amounts." : "",
+        voice.placeholder ? "config/voice.md has not been filled in, so the opening is a stub." : "",
+      ].filter(Boolean),
+    }, { status: 201 });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Unable to build the proposal." }, { status: 400 });
+  }
+}

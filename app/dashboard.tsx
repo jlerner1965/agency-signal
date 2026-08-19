@@ -91,15 +91,40 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
     finally { setBusy(false); }
   }
 
+  /**
+   * One scoring path: the module engine. The run is created and then advanced a
+   * module at a time, waiting out any backoff the runner asks for.
+   */
   async function runAudit() {
     if (!selected || busy) return;
-    setBusy(true); setToast("Reviewing the live website and mobile experience…");
+    setBusy(true); setToast("Starting the audit run…");
     try {
-      const response = await fetch("/api/audit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: selected.id, website: selected.website }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Audit failed");
-      replaceLead(payload.lead); setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.pagesAudited ?? 1); setAuditSummary(payload.audit ?? null); await loadDetail(selected.id); setToast(`${payload.pagesAudited}-page evidence audit complete · score ${payload.lead.score}`);
-    } catch (error) { setToast(error instanceof Error ? error.message : "Audit could not be completed"); }
+      const created = await fetch("/api/audit-runs", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ leadId: selected.id }),
+      });
+      const start = await created.json();
+      if (!created.ok) throw new Error(start.error || "The audit run could not be started.");
+
+      let summary = start;
+      for (let step = 0; step < 40 && summary.pending; step += 1) {
+        const ticked = await fetch(`/api/audit-runs/${start.run.id}/tick`, { method: "POST" });
+        summary = await ticked.json();
+        if (!ticked.ok) throw new Error(summary.error || "The audit run failed.");
+        const done = summary.modules.filter((module: { status: string }) => module.status !== "Queued" && module.status !== "Running").length;
+        setToast(`Auditing — ${done} of ${summary.modules.length} modules complete…`);
+        if (summary.pending && summary.waitingFor) {
+          const waitMs = Math.min(Math.max(0, new Date(summary.waitingFor).getTime() - Date.now()), 65_000);
+          if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs + 400));
+        }
+      }
+
+      await loadLeads();
+      await loadDetail(selected.id);
+      setToast(summary.run.overallScore === null
+        ? `Audit finished without a score — ${summary.run.error || "too little could be verified"}`
+        : `Audit complete · score ${summary.run.overallScore} at ${summary.run.confidence}% verified`);
+    } catch (error) { setToast(error instanceof Error ? error.message : "The audit could not be completed"); }
     finally { setBusy(false); }
   }
 

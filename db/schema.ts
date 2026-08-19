@@ -151,6 +151,16 @@ export const proposals = sqliteTable("proposals", {
   acceptedAt: text("accepted_at"),
   signerName: text("signer_name").notNull().default(""),
   signerEmail: text("signer_email").notNull().default(""),
+  // Engine-era fields. A proposal is a draft until a person approves it, and
+  // nothing is exportable while pricing or voice are still placeholders.
+  runId: integer("run_id"),
+  version: integer("version").notNull().default(1),
+  tier: text("tier").notNull().default(""),
+  scopeItems: text("scope_items").notNull().default("[]"),
+  openingProse: text("opening_prose").notNull().default(""),
+  pricingPlaceholder: integer("pricing_placeholder", { mode: "boolean" }).notNull().default(true),
+  voicePlaceholder: integer("voice_placeholder", { mode: "boolean" }).notNull().default(true),
+  approvedAt: text("approved_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -261,3 +271,33 @@ export const findings = sqliteTable("findings", {
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("findings_run_idx").on(table.runId, table.sortOrder)]);
+
+/** Findings mapped to the service menu. Rationale prose is model-written; the mapping is not. */
+export const recommendations = sqliteTable("recommendations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: integer("run_id").notNull(),
+  serviceLine: text("service_line").notNull(),
+  label: text("label").notNull(),
+  rationale: text("rationale").notNull().default(""),
+  rationaleSource: text("rationale_source").notNull().default("none"),
+  findingIds: text("finding_ids").notNull().default("[]"),
+  priority: real("priority").notNull().default(0),
+  status: text("status").notNull().default("Draft"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("recommendations_run_idx").on(table.runId, table.sortOrder)]);
+
+/** A single-file HTML mockup served at its own stable public URL. */
+export const mockups = sqliteTable("mockups", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: integer("run_id").notNull(),
+  leadId: integer("lead_id").notNull(),
+  token: text("token").notNull().unique(),
+  kind: text("kind").notNull(),
+  title: text("title").notNull().default(""),
+  html: text("html").notNull(),
+  brandTokens: text("brand_tokens").notNull().default("{}"),
+  source: text("source").notNull().default("template"),
+  viewCount: integer("view_count").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("mockups_run_idx").on(table.runId)]);

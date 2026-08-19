@@ -26,7 +26,7 @@ export async function collectGoogle(context: CollectContext, keys: Record<string
       source: "crawl", requestKey: cKey, ok: Boolean(home?.ok),
       retryable: Boolean(!home?.ok && crawl.homeRetryable),
       failureReason: home?.ok ? "" : home?.reason ?? "The website could not be reached.",
-      payload: { pages: crawl.pages.map(distillPage), navigation: crawl.navigation, diagnostics: crawl.diagnostics, manual: {} },
+      payload: { pages: crawl.pages.map((page, index) => distillPage(page, { keepMarkup: index === 0 })), navigation: crawl.navigation, homeCss: crawl.homeCss, diagnostics: crawl.diagnostics, manual: {} },
     });
   }
 

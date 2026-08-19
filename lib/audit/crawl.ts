@@ -77,6 +77,35 @@ async function fetchPage(url: string): Promise<CrawledPage & { server: string; c
   }
 }
 
+/**
+ * Linked stylesheets from the homepage, bounded. Most real sites keep their
+ * palette in an external file, so reading only inline CSS would mean brand
+ * tokens are almost always defaults.
+ */
+async function fetchStylesheets(html: string, baseUrl: string) {
+  const hrefs = [...html.matchAll(/<link\b[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi)]
+    .concat([...html.matchAll(/<link\b[^>]*href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/gi)])
+    .map((match) => match[1])
+    .filter(Boolean);
+
+  const sameOrigin = [...new Set(hrefs)]
+    .map((href) => { try { return new URL(href, baseUrl).toString(); } catch { return ""; } })
+    .filter((href) => href && new URL(href).origin === new URL(baseUrl).origin)
+    .slice(0, 3);
+
+  const parts: string[] = [];
+  for (const href of sameOrigin) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const response = await fetch(href, { signal: controller.signal, headers: { "user-agent": USER_AGENT, accept: "text/css" } });
+      if (response.ok) parts.push((await response.text()).slice(0, 120_000));
+    } catch { /* a stylesheet we cannot read just means fewer brand tokens */ }
+    finally { clearTimeout(timer); }
+  }
+  return parts.join("\n").slice(0, 250_000);
+}
+
 async function fetchRobots(origin: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
@@ -180,5 +209,6 @@ export async function crawlSite(website: string, options: { maxPages?: number; b
   if (!diagnostics.truncatedBy && queue.length && pages.length >= maxPages) diagnostics.truncatedBy = "page-cap";
 
   const navigation = pages[0]?.ok ? extractNavigationLinks(pages[0].html, pages[0].url) : [];
-  return { pages, diagnostics, navigation, homeRetryable, robotsBody: robotsResponse.body };
+  const homeCss = pages[0]?.ok ? await fetchStylesheets(pages[0].html, pages[0].url) : "";
+  return { pages, diagnostics, navigation, homeCss, homeRetryable, robotsBody: robotsResponse.body };
 }

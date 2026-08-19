@@ -4,6 +4,7 @@ import { audits, competitorAudits, leads, reportEvents } from "@/db/schema";
 import { getLeadByToken } from "@/lib/server-data";
 import { buildOpportunity } from "@/lib/opportunity";
 import { compareAudits } from "@/lib/audit-history";
+import { reportPayload } from "@/lib/audit/deliverables";
 
 export async function GET(
   _request: Request,
@@ -27,6 +28,9 @@ export async function GET(
         })
         .where(eq(leads.id, report.lead.id)),
     ]);
+    // The engine run is authoritative when one exists; the legacy audit is the
+    // fallback until that path retires.
+    const engine = await reportPayload(report.lead.id);
     const { lead, audit } = report;
     const findings = audit && audit.confidenceScore > 0 ? report.findings : [];
     return Response.json({
@@ -41,6 +45,7 @@ export async function GET(
         conversionScore: lead.conversionScore,
         technicalScore: lead.technicalScore,
         trustScore: lead.trustScore,
+        scoreConfidence: lead.scoreConfidence,
         lastAuditAt: lead.lastAuditAt,
       },
       findings,
@@ -53,6 +58,7 @@ export async function GET(
         screenshotKey: audit.screenshotKey,
         createdAt: audit.createdAt,
       } : null,
+      engine,
       auditComparison: compareAudits(auditHistory[0], auditHistory[1]),
       competitors: competitors.map((item) => ({ id: item.id, name: item.name, website: item.website, score: item.score, visibilityScore: item.visibilityScore, conversionScore: item.conversionScore, technicalScore: item.technicalScore, trustScore: item.trustScore, confidenceScore: item.confidenceScore, pagesAudited: item.pagesAudited, screenshotKey: item.screenshotKey })),
       opportunity: buildOpportunity(lead, findings),

@@ -2,8 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import type { Finding, Opportunity, PublicReportLead } from "@/lib/types";
+import EngineReport, { type EngineReport as EngineReportData } from "./engine-report";
 
-type ReportPayload = { lead: PublicReportLead; findings: Finding[]; opportunity: Opportunity; audit: { pagesAudited: number; confidenceScore: number; checksPassed: number; checksFailed: number; checksUnverified: number; screenshotKey: string; createdAt: string } | null; auditComparison: { scoreDelta: number; resolved: string[]; regressed: string[] } | null; competitors: Array<{ id: number; name: string; website: string; score: number; visibilityScore: number; conversionScore: number; technicalScore: number; trustScore: number; confidenceScore: number; pagesAudited: number; screenshotKey: string }> };
+type ReportPayload = { lead: PublicReportLead; findings: Finding[]; opportunity: Opportunity; audit: { pagesAudited: number; confidenceScore: number; checksPassed: number; checksFailed: number; checksUnverified: number; screenshotKey: string; createdAt: string } | null; auditComparison: { scoreDelta: number; resolved: string[]; regressed: string[] } | null; competitors: Array<{ id: number; name: string; website: string; score: number; visibilityScore: number; conversionScore: number; technicalScore: number; trustScore: number; confidenceScore: number; pagesAudited: number; screenshotKey: string }>; engine: EngineReportData | null };
 
 export default function ReportView({ token, ownerName }: { token: string; ownerName: string }) {
   const ownerFirstName = ownerName.split(/\s+/)[0];
@@ -61,8 +62,45 @@ export default function ReportView({ token, ownerName }: { token: string; ownerN
     );
   }
 
-  const { lead, findings, opportunity, audit, auditComparison, competitors } = payload;
+  const { lead, findings, opportunity, audit, auditComparison, competitors, engine } = payload;
   const scoreLabel = lead.score < 55 ? "Needs attention" : lead.score < 70 ? "Opportunity identified" : "Solid foundation";
+
+  // A finished engine run is authoritative. The legacy sections below remain
+  // only until that path retires.
+  if (engine) {
+    return (
+      <main className="report-shell">
+        <header className="report-nav"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><span className="confidential">Private digital opportunity brief</span></header>
+        <section className="report-hero">
+          <div className="report-container report-hero-grid">
+            <div>
+              <p className="eyebrow">Prepared for {lead.contactName || lead.agencyName}</p>
+              <h1>{lead.agencyName}<br /><span>Digital Opportunity Brief</span></h1>
+              <p className="report-intro">A review of what this business publicly sells, what its Google presence represents, and where the two do not match.</p>
+            </div>
+          </div>
+        </section>
+        <EngineReport report={engine} businessName={lead.agencyName} />
+        <section className="report-cta"><div className="report-container report-cta-inner">
+          <div>
+            <p className="eyebrow">Recommended next step</p>
+            <h2>Review the findings together in 15 minutes.</h2>
+            <p>I&rsquo;ll explain which changes are worth prioritising, what can be fixed quickly, and where a larger rebuild would actually be justified.</p>
+          </div>
+          {requestState === "sent"
+            ? <div className="request-success" role="status"><strong>Request received.</strong><span>{ownerFirstName} will follow up using the email you provided.</span></div>
+            : <form className="review-form" onSubmit={requestReview}>
+                <label>Your name<input name="name" autoComplete="name" required /></label>
+                <label>Email<input name="email" type="email" autoComplete="email" required /></label>
+                <label className="span-two">What would you like to discuss?<textarea name="message" rows={3} placeholder="Optional" /></label>
+                {requestError && <p className="form-error">{requestError}</p>}
+                <button className="report-primary span-two" disabled={requestState === "sending"}>{requestState === "sending" ? "Sending…" : "Request a review"}</button>
+              </form>}
+        </div></section>
+        <footer className="report-footer"><div className="report-container"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><p>Evidence-led digital opportunity briefs for growing businesses.</p><span>Prepared by {ownerName}</span></div></footer>
+      </main>
+    );
+  }
   return (
     <main className="report-shell">
       <header className="report-nav"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><span className="confidential">Private digital opportunity brief</span></header>

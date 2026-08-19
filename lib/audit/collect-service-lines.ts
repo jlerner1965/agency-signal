@@ -32,8 +32,9 @@ export async function collectServiceLines(context: CollectContext, keys: Record<
       failureReason: home?.ok ? "" : home?.reason ?? "The website could not be reached.",
       payload: {
         // Distilled, not raw: D1 caps a row at 2 MB.
-        pages: crawl.pages.map(distillPage),
+        pages: crawl.pages.map((page, index) => distillPage(page, { keepMarkup: index === 0 })),
         navigation: crawl.navigation,
+        homeCss: crawl.homeCss,
         diagnostics: crawl.diagnostics,
         manual: {
           googlePrimaryCategory: lead.googlePrimaryCategory ?? "",

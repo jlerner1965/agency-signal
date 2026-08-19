@@ -16,7 +16,7 @@ const SECRET_KEYS = [
   "AGENCYSIGNAL_SESSION_SECRET",
 ];
 // Not a secret, but it belongs beside the login it names.
-const KEYS = [...SECRET_KEYS, "AGENCYSIGNAL_OWNER_NAME", "PAGESPEED_API_KEY"];
+const KEYS = [...SECRET_KEYS, "AGENCYSIGNAL_OWNER_NAME", "PAGESPEED_API_KEY", "GOOGLE_PLACES_API_KEY"];
 
 function base64Url(bytes) {
   return Buffer.from(bytes).toString("base64").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
@@ -110,27 +110,47 @@ const values = {
   AGENCYSIGNAL_OWNER_NAME: (flags.owner ?? "").trim().slice(0, 80),
 };
 
+// Both API keys are prompted for rather than left to be discovered later: one
+// is free and its absence silently degrades every run, and the other is what
+// makes the service-line gap analysis possible at all.
+const existingVars = await readFile(DEV_VARS, "utf8").catch(() => "");
+const alreadySet = (key) => new RegExp(`^${key}=.+`, "m").test(existingVars);
+
+const API_KEYS = [
+  {
+    name: "PAGESPEED_API_KEY",
+    flag: "pagespeed-key",
+    prompt: "PageSpeed API key (free, no billing; blank to skip): ",
+    warning:
+      "\u26a0  PAGESPEED_API_KEY is not set.\n" +
+      "   Runs still work, but PageSpeed applies its unkeyed quota and starts returning\n" +
+      "   429 in a batch, which leaves prospects unscored for no good reason.\n" +
+      "   Free, no billing details: https://developers.google.com/speed/docs/insights/v5/get-started",
+  },
+  {
+    name: "GOOGLE_PLACES_API_KEY",
+    flag: "places-key",
+    prompt: "Google Places API key (billed per request; blank to skip): ",
+    warning:
+      "\u26a0  GOOGLE_PLACES_API_KEY is not set.\n" +
+      "   Without it the Google presence module cannot read a profile, so the\n" +
+      "   service-line gap table \u2014 the point of the tool \u2014 stays empty.\n" +
+      "   Enable Places API (New): https://console.cloud.google.com/apis/library/places.googleapis.com",
+  },
+];
+
+for (const key of API_KEYS) {
+  const provided = (flags[key.flag] ?? "").trim();
+  if (provided) { values[key.name] = provided; continue; }
+  if (alreadySet(key.name)) continue;
+  const entered = stdin.isTTY && flags.email === undefined ? (await prompt(key.prompt)).trim() : "";
+  if (entered) { values[key.name] = entered; continue; }
+  console.warn(`\n${key.warning}\n   Add it later with: npm run auth:credentials -- --${key.flag} YOUR_KEY\n`);
+}
+
 if (flags["print-only"] === undefined) {
   await mergeDevVars(values);
   console.log(`Wrote ${DEV_VARS} — \`npm run dev\` can now sign in as ${email}.`);
-}
-
-// PageSpeed is free and its absence silently degrades every audit run, so it
-// is called out rather than buried in a list of optional variables.
-const pagespeedKey = (flags["pagespeed-key"] ?? "").trim();
-if (pagespeedKey) {
-  values.PAGESPEED_API_KEY = pagespeedKey;
-} else {
-  const existing = await readFile(DEV_VARS, "utf8").catch(() => "");
-  if (!/^PAGESPEED_API_KEY=.+/m.test(existing)) {
-    console.warn(
-      "\n\u26a0  PAGESPEED_API_KEY is not set.\n" +
-      "   Audit runs still work, but PageSpeed applies its unkeyed quota and starts\n" +
-      "   returning 429 in a batch, which leaves prospects unscored for no good reason.\n" +
-      "   The key is free and needs no billing details: https://developers.google.com/speed/docs/insights/v5/get-started\n" +
-      "   Then re-run: npm run auth:credentials -- --pagespeed-key YOUR_KEY\n",
-    );
-  }
 }
 
 console.log("\nSet these as secrets in the hosted runtime (never commit them):\n");

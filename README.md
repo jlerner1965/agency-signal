@@ -1,151 +1,123 @@
 # AgencySignal
 
-AgencySignal finds evidence-backed opportunities on business websites and gives a seller a structured workflow to qualify, follow up, propose, and close them.
+AgencySignal takes one business and produces a client-ready package: a scored
+audit of its website and Google presence, a proposal derived from what the audit
+found, and brand-matched mockups of the redesign — each served at a stable public
+URL, and none of it exportable until a person approves it.
 
-## AI Sales Copilot
+## The premise
 
-The Close workspace includes five human-reviewed AI actions: sales brief, next action, personalized email, discovery analysis, and proposal narrative. Each result shows the exact saved CRM or audit evidence it used, its confidence, and missing information. AI drafts never send messages, change stages, set prices, or edit records automatically.
+Google flattens a multi-service business into one category. A clinic offering
+functional medicine, hormone therapy, aesthetics, and an education arm appears as
+"Medical clinic" and competes for one set of searches. The audit is built to find
+that: it reads every service the website sells, reads what the Google profile
+represents, and reports the difference.
 
-Set `OPENAI_API_KEY` as a secret production environment variable to enable generation. `OPENAI_MODEL` is optional and defaults to `gpt-5.4-nano`. API responses use a strict JSON schema and are stored with Draft, Approved, or Discarded status for review history.
+Everything else — technical checks, on-page SEO, conversion paths — is supporting
+evidence, and is weighted accordingly.
 
-AgencySignal is an evidence-led audit-to-sale workspace for growing businesses. It combines prospect imports, public-homepage auditing, shareable opportunity briefs, engagement signals, personalized Gmail outreach, and follow-up management in one focused application.
+## Running an audit
 
-## Features
+1. Add a business (name and website are enough), or import a CSV.
+2. Open it and press **Run website audit**, or use the **Audit engine** tab for
+   per-module detail.
+3. The run advances one module at a time. Nothing is lost if you close the tab —
+   the whole run lives in the database and resumes on the next tick.
+4. When it finishes, **Build report, proposal and mockups** produces the package.
 
-- Persistent business lead pipeline
-- Prioritized daily action queue for overdue, engaged, audit-ready, and unaudited prospects
-- CSV import with common lead-source field mapping and duplicate detection
-- Add and manage prospect records
-- Live multi-page website audits covering up to five prioritized pages
-- Controlled batch auditing for up to ten prospects, processed two at a time with progress and failure visibility
-- Deterministic visibility, conversion, technical, and trust scoring
-- Evidence-backed findings with recommendations
-- Transparent opportunity scoring and recommended service matching
-- Five-factor closing readiness scoring: fit, need, intent, urgency, and reachability
-- Qualification and discovery records with stage exit requirements
-- Prospect-specific discovery call questions and objection-response guidance
-- Human-reviewed five-step outreach sequences that pause when a prospect advances
-- Defined offer catalog with outcomes, deliverables, pricing, timelines, and proof criteria
-- Trackable public proposals with view counts, expiration, and recorded acceptance
-- Revenue dashboard covering pipeline value, proposals, wins, close rate, and loss reasons
-- Personalized “best evidence” outreach angles and next-action guidance
-- Public prospect reports protected by opaque 128-bit links
-- Report-view tracking
-- Prospect review-request capture
-- Email/password protected dashboard and APIs with signed, time-limited sessions
-- Personalized outreach copy and prefilled Gmail compose
-- Sales notes, follow-up scheduling, and real activity history
-- Follow-up and pipeline-stage management
-- Responsive desktop and mobile interface
+Every artifact is a draft. Nothing in this system sends anything to a prospect.
 
-## Technology
+### What a run produces
 
-- Next.js 16 and React 19
-- TypeScript
-- Vinext and Cloudflare Workers
-- Cloudflare D1
-- Drizzle ORM
-- Tailwind CSS 4
+- A **score out of 100**, but only when enough of the rubric could actually be
+  verified. Below that threshold the run reports "not scored" and says why. A
+  site that could not be read is reported as unread, never as a low score.
+- **Findings** ranked by impact over effort, so the top of the list is the
+  fastest meaningful win.
+- A **service-line gap table**: what the site sells, where each line was read
+  from with the text quoted, whether it has its own page, and whether Google
+  represents it. A line that cannot cite its source does not appear.
+- **Checks that could not run**, listed explicitly. An omitted check reads as a
+  pass, so nothing is omitted.
+- **Crawl diagnostics** — final status, robots.txt fetchability, pages reached
+  against pages attempted, and any blocking responses with their server headers.
+
+## Configuration
+
+| File | Controls |
+| --- | --- |
+| `lib/audit/scoring-config.js` | Category weights, the confidence threshold below which no score is reported, severity-to-impact defaults, and the retry policy. |
+| `lib/audit/cost-config.js` | Estimated per-call costs, used for reporting what a run cost. |
+| `lib/audit/registry.js` | Which modules run, in what order, and which API keys each one wants. |
+| `config/pricing.json` | Proposal tiers and the service menu. **Ships with placeholders** — a proposal is not exportable until `placeholder` is set to `false`. |
+| `config/voice.md` | The voice the proposal's opening is written in. **Ships as a placeholder** — until it is replaced, that section renders as a visible stub. |
 
 ## Local development
 
-Requirements:
-
-- Node.js 22.13 or newer
-- npm
-- Linux environment with `flock`, `curl`, and GNU `timeout`
-
-First run — installs dependencies, provisions a dashboard login, and applies the
-database migrations to the local Cloudflare D1 database:
+Requirements: Node.js 22.13 or newer, npm, and a Linux environment with `flock`,
+`curl`, and GNU `timeout`.
 
 ```bash
-npm run setup
+npm run setup     # dependencies, a login, both API keys, and the database
 npm run dev
 ```
 
-`npm run setup` prompts for a login email and password. Pass them directly to
-skip the prompts, and add `--owner` to set the name shown on prospect-facing
-reports and proposals:
+`npm run setup` prompts for a login email and password, and for both API keys.
+Pass them directly to skip the prompts:
 
 ```bash
-npm run setup -- --email you@example.com --password 'a long passphrase' --owner 'Your Name'
+npm run setup -- --email you@example.com --password 'a long passphrase' \
+  --owner 'Your Name' --pagespeed-key KEY --places-key KEY
 ```
 
 It writes `.dev.vars`, which is git-ignored and read by the local Worker, and
 prints the same values for the hosted runtime. The password itself is never
-stored; only a PBKDF2-SHA-256 derivation of it is. Re-run
-`npm run auth:credentials` at any time to rotate the login — rotating the
-session secret signs out existing sessions.
+stored. Re-run `npm run auth:credentials` to rotate the login or add a key later.
 
-The app is unusable without these four values, so the hosted runtime needs them
-as secrets: `AGENCYSIGNAL_LOGIN_EMAIL`, `AGENCYSIGNAL_PASSWORD_SALT`,
-`AGENCYSIGNAL_PASSWORD_HASH`, and `AGENCYSIGNAL_SESSION_SECRET`. Keep every
-authentication value out of the repository. `AGENCYSIGNAL_OWNER_NAME` is
-optional and defaults to a name derived from the login address.
+### API keys
 
-Create a production build:
+| Key | Needed for | Cost |
+| --- | --- | --- |
+| `PAGESPEED_API_KEY` | Lighthouse scores and Core Web Vitals | Free. 25k/day, 400 per 100s. Without it PageSpeed throttles to 429 in a batch and those checks report as not measured. |
+| `GOOGLE_PLACES_API_KEY` | Reading the Google Business Profile | Billed per request; the field mask is pinned in code because Google bills by SKU tier. Without it the gap table cannot be built. |
+| `OPENAI_API_KEY` | Optional. Writes recommendation rationale prose. | Per token. Without it the rationale is assembled from the findings themselves. |
 
-```bash
-npm run build
-```
-
-Run the build and the test suite:
+### Other commands
 
 ```bash
-npm test
+npm run build        # production build
+npm test             # build plus the full test suite
+npm run lint
+npm run db:generate  # after editing db/schema.ts
+npm run db:migrate   # apply migrations to the local database
 ```
-
-### Database
 
 The hosted runtime applies the migrations packaged into `dist/.openai/drizzle`
-on deploy. Local development applies the same files itself:
+on deploy. `npm run db:migrate` applies the same files locally and is safe to
+re-run.
 
-```bash
-npm run db:migrate
-```
-
-The command is idempotent and records what it has applied, so it is safe to
-re-run after pulling new migrations. After editing `db/schema.ts`, generate a
-migration and apply it:
-
-```bash
-npm run db:generate
-npm run db:migrate
-```
-
-If the dashboard reports that the database has no tables, the migrations have
-not been applied to that environment yet.
-
-### Optional integrations
-
-| Variable | Effect when unset |
-| --- | --- |
-| `OPENAI_API_KEY` | The AI Copilot actions return a 503 explaining that a key is required. Everything else works. |
-| `OPENAI_MODEL` | Defaults to `gpt-5.4-nano`. |
-| `PAGESPEED_API_KEY` | Lighthouse enrichment is attempted unauthenticated and is skipped on failure. Audits still run on the app's own evidence checks. |
-
-## Important directories
+## Directories
 
 ```text
-app/                Application pages and API routes
+app/                Pages and API routes
+config/             Pricing tiers and the proposal voice sample
 db/                 Drizzle schema and D1 access
-drizzle/            Generated database migrations
-lib/                Shared types, scoring, CSV/search utilities, and server helpers
-public/             Static assets
+docs/               Handover notes and the original implementation plan
+drizzle/            Generated and hand-written migrations
+lib/audit/          The audit engine: runner, modules, config, deliverables
+lib/                Shared types and helpers
 scripts/            Setup, install, build, migration, and validation helpers
 tests/              Node test-runner suites
 worker/             Cloudflare Worker entry point
 ```
 
-## Current MVP boundaries
+## Boundaries
 
-- Website auditing reviews publicly observable evidence from the homepage and up to four prioritized internal pages.
-- Findings should be reviewed by a person before prospect outreach.
-- Outreach opens as a prefilled Gmail draft for human review and sending; direct API sending requires a separately configured Google OAuth integration.
-- Proposal acceptance records approval and contact information; a final service agreement, payment collection, and fulfillment onboarding remain human-controlled.
-- Google Places and Business Profile integrations require separate credentials and are not configured in this repository.
-- No fictional lead records are seeded. The workspace starts with only real user-imported or manually entered prospects.
-
-## Data and security
-
-The audit endpoint accepts only public HTTP or HTTPS websites. It blocks localhost, private IPv4 ranges, link-local addresses, custom ports, and non-HTML responses. Environment files and generated deployment artifacts are excluded through `.gitignore`.
+- Only public data is used. The crawler honours `robots.txt`, throttles to one
+  request at a time, and identifies itself honestly.
+- Forms are assessed by static analysis only. No request is issued that could
+  write a record into a prospect's system, and the evidence text says so.
+- There is no email-sending code anywhere in this repository. Outreach is a
+  person copying text out of the dashboard.
+- Fields the Places API does not expose for a profile we do not own become an
+  explicit manual-check list; a person's entered values feed the same checks.

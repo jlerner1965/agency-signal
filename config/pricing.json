@@ -1,0 +1,38 @@
+{
+  "_comment": "PLACEHOLDER PRICING. Every number below is a placeholder and is marked as such in the UI until `placeholder` is set to false. Replace the amounts and edit the scope lines, then set \"placeholder\": false to allow a proposal to be marked exportable.",
+  "placeholder": true,
+  "currency": "USD",
+  "tiers": [
+    {
+      "id": "foundation",
+      "name": "Foundation",
+      "price": 2500,
+      "timeline": "2–3 weeks",
+      "summary": "PLACEHOLDER — the smallest engagement that fixes the highest-priority findings.",
+      "includes": ["PLACEHOLDER scope line", "PLACEHOLDER scope line", "PLACEHOLDER scope line"]
+    },
+    {
+      "id": "growth",
+      "name": "Growth",
+      "price": 6500,
+      "timeline": "5–7 weeks",
+      "summary": "PLACEHOLDER — the recommended engagement covering the site and the profile together.",
+      "includes": ["PLACEHOLDER scope line", "PLACEHOLDER scope line", "PLACEHOLDER scope line", "PLACEHOLDER scope line"]
+    },
+    {
+      "id": "partner",
+      "name": "Partner",
+      "price": 12000,
+      "timeline": "10–12 weeks",
+      "summary": "PLACEHOLDER — a full rebuild plus the ongoing work that keeps it earning.",
+      "includes": ["PLACEHOLDER scope line", "PLACEHOLDER scope line", "PLACEHOLDER scope line", "PLACEHOLDER scope line", "PLACEHOLDER scope line"]
+    }
+  ],
+  "services": {
+    "site-rebuild": { "label": "Website rebuild", "tier": "partner" },
+    "local-seo": { "label": "Local SEO and profile optimisation", "tier": "foundation" },
+    "service-pages": { "label": "Service-page content build", "tier": "growth" },
+    "conversion": { "label": "Conversion optimisation", "tier": "growth" },
+    "analytics": { "label": "Analytics setup", "tier": "foundation" }
+  }
+}

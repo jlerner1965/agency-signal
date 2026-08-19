@@ -10,6 +10,9 @@ import { collectServiceLines } from "@/lib/audit/collect-service-lines";
 import { analyzeServiceLines } from "@/lib/audit/analyze-service-lines";
 import { collectGoogle } from "@/lib/audit/collect-google";
 import { analyzeGooglePresence } from "@/lib/audit/analyze-google";
+import { collectOnPage } from "@/lib/audit/collect-onpage";
+import { analyzeSeo } from "@/lib/audit/analyze-seo";
+import { analyzeConversion } from "@/lib/audit/analyze-conversion";
 
 export type ModuleOutcome = {
   status: "Complete" | "Skipped" | "Failed" | "Unreachable" | "Retrying";
@@ -80,6 +83,8 @@ const collectors: Record<string, (context: CollectContext, keys: Record<string, 
   technical: collectTechnical,
   "service-lines": collectServiceLines,
   google: collectGoogle,
+  seo: collectOnPage,
+  conversion: collectOnPage,
 };
 
 type RawAnalysis = {
@@ -100,6 +105,8 @@ const analyzers: Record<string, Analyzer> = {
   technical: analyzeTechnical as Analyzer,
   "service-lines": analyzeServiceLines as Analyzer,
   google: analyzeGooglePresence as Analyzer,
+  seo: analyzeSeo as Analyzer,
+  conversion: analyzeConversion as Analyzer,
 };
 
 function isSeverity(value: string): value is Severity {
