@@ -7,10 +7,8 @@ if [[ "${SITES_ENV_READY:-}" != "1" ]]; then
   exec "${script_dir}/sites-env.sh" -- "$0" "$@"
 fi
 
-command -v timeout || {
-  echo "build-verified.sh requires GNU timeout." >&2
-  exit 69
-}
+# shellcheck source=scripts/portable-tools.sh
+. "${script_dir}/portable-tools.sh"
 
 vinext="${SITES_PROJECT_ROOT}/node_modules/.bin/vinext"
 if [[ ! -x "${vinext}" ]]; then
@@ -19,10 +17,9 @@ if [[ ! -x "${vinext}" ]]; then
 fi
 
 echo "Running bounded vinext build..."
-timeout \
-  --signal=TERM \
-  --kill-after="${SITES_BUILD_KILL_AFTER:-10s}" \
+sites_run_bounded \
   "${SITES_BUILD_TIMEOUT:-3m}" \
+  "${SITES_BUILD_KILL_AFTER:-10s}" \
   "${vinext}" build
 
 "${script_dir}/validate-artifact.sh"

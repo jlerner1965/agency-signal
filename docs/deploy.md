@@ -137,6 +137,16 @@ and applies only what is pending.
 Run it before `npm run deploy`, not after. A Worker serving traffic against a
 database without its schema returns 500 on every page that touches data.
 
+## Running the commands here
+
+Any Unix shell with Node 22.13 or newer. The scripts resolve the GNU tools they
+need through `scripts/portable-tools.sh`, so macOS works without Homebrew:
+`shasum` stands in for `sha256sum`, a `mkdir` lock stands in for `flock`, and a
+missing GNU `timeout` drops the time bound with a warning rather than failing.
+Installing coreutils (`brew install coreutils`) restores the bound.
+
+Windows needs WSL.
+
 ## Preflight
 
 Run all four. Each is a gate, and `build` refuses to hand off an artifact that
