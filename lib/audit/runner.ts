@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditRunModules, auditRuns, findings as findingsTable, leads, rawPayloads } from "@/db/schema";
 import { auditModules, missingRequirements, moduleById } from "@/lib/audit/registry";
-import { backoffSeconds, categoryWeights, clampScore, confidenceOf, minimumConfidence, orderFindings, unverifiedReasons } from "@/lib/audit/scoring-config";
+import { backoffSeconds, categoryWeights, clampScore, confidenceOf, minimumConfidence, orderFindings, scopedChecks, unverifiedReasons } from "@/lib/audit/scoring-config";
 import { runtimeValue } from "@/lib/runtime-env";
 import { collectTechnical } from "@/lib/audit/collect-technical";
 import { analyzeTechnical } from "@/lib/audit/analyze-technical";
@@ -304,9 +304,14 @@ async function runModule(runId: number, moduleId: string, context: CollectContex
     : "";
 
   const reason = exhausted ? unverifiedReasons.RETRIES_EXHAUSTED : unverifiedReasons.SOURCE_UNAVAILABLE;
-  const checks = analysis.checks.map((check) => check.status === "unverified"
-    ? { ...check, unverifiedReason: analysis.reachable ? reason : unverifiedReasons.HOST_UNREACHABLE }
-    : check);
+  const checks = analysis.checks.map((check) => {
+    if (check.status !== "unverified") return check;
+    if (!analysis.reachable) return { ...check, unverifiedReason: unverifiedReasons.HOST_UNREACHABLE };
+    // An analyser that already said why keeps its reason. Overwriting it turned
+    // "nothing on the page to measure" into "the source was unavailable", which
+    // is a different thing to tell a client and now also scores differently.
+    return { ...check, unverifiedReason: check.unverifiedReason ?? reason };
+  });
 
   return {
     // An unreachable site is its own status. It must never read as a low score.
@@ -451,7 +456,12 @@ async function finalizeRun(runId: number) {
   // Too little of the rubric verified is its own kind of "no result". Reporting
   // 100 from six of sixteen checks would be worse than reporting nothing.
   const confidence = confidenceOf(checks);
-  const checksVerified = checks.filter((check) => check.status !== "unverified").length;
+  // The counts shown beside the percentage describe the same rubric it is a
+  // share of. Checks whose source was never in scope for this run are still
+  // listed and still say why, but counting them in the denominator would
+  // report a fraction the percentage is not derived from.
+  const scoped = scopedChecks(checks);
+  const checksVerified = scoped.filter((check) => check.status !== "unverified").length;
   const underMeasured = weighted !== null && confidence < minimumConfidence;
   const overall = underMeasured ? null : weighted;
 
@@ -471,7 +481,8 @@ async function finalizeRun(runId: number) {
       .where(eq(findingsTable.id, finding.id));
   }
 
-  const underMeasuredNote = `Only ${confidence}% of the audit rubric could be verified (${checksVerified} of ${checks.length} checks), below the ${minimumConfidence}% needed to report a score. Configure PAGESPEED_API_KEY, or re-run when the unavailable sources respond.`;
+  const outOfScope = checks.length - scoped.length;
+  const underMeasuredNote = `Only ${confidence}% of the audit rubric could be verified (${checksVerified} of ${scoped.length} checks in scope${outOfScope ? `, with ${outOfScope} more needing a source this run did not have` : ""}), below the ${minimumConfidence}% needed to report a score. Configure PAGESPEED_API_KEY, or re-run when the unavailable sources respond.`;
 
   const [run] = await db.update(auditRuns).set({
     status: allFailed ? "Failed" : incomplete || underMeasured ? "Complete with gaps" : "Complete",
@@ -483,7 +494,7 @@ async function finalizeRun(runId: number) {
     reachable: !unreachable,
     confidence,
     checksVerified,
-    checksTotal: checks.length,
+    checksTotal: scoped.length,
     costCents: moduleRows.reduce((sum, row) => sum + row.costCents, 0),
     error: allFailed
       ? moduleRows.find((row) => row.message)?.message ?? "No module produced a result."

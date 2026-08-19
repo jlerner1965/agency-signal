@@ -163,6 +163,7 @@ export const proposals = sqliteTable("proposals", {
   priceDisplay: text("price_display").notNull().default(""),
   retainer: text("retainer").notNull().default(""),
   minimumApplied: integer("minimum_applied", { mode: "boolean" }).notNull().default(false),
+  mockupLinks: text("mockup_links").notNull().default("[]"),
   pricingPlaceholder: integer("pricing_placeholder", { mode: "boolean" }).notNull().default(true),
   voicePlaceholder: integer("voice_placeholder", { mode: "boolean" }).notNull().default(true),
   approvedAt: text("approved_at"),

@@ -151,8 +151,12 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
   }
 
   /**
-   * The package is built in order: recommendations gate the proposal, and the
-   * mockups need the service lines the run already found.
+   * The package is built in order: recommendations gate the proposal, the
+   * mockups need the service lines the run already found, and the proposal
+   * comes last because it links the mockups. Drafting it first left the
+   * opening referring to concept pages that did not exist yet, and on a
+   * re-run it referred to the previous pass's pages, which this rebuild
+   * replaces with fresh tokens.
    */
   async function buildPackage(runId: number) {
     setPackaging("Building recommendations…");
@@ -162,17 +166,17 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
       const recPayload = await recResponse.json();
       if (!recResponse.ok) throw new Error(recPayload.error || "Recommendations failed.");
 
+      setPackaging("Generating mockups…");
+      const mockupResponse = await fetch(`/api/audit-runs/${runId}/mockups`, { method: "POST" });
+      const mockupPayload = await mockupResponse.json();
+      if (!mockupResponse.ok) throw new Error(mockupPayload.error || "Mockups failed.");
+
       setPackaging("Drafting the proposal…");
       const proposalResponse = await fetch(`/api/audit-runs/${runId}/proposal`, {
         method: "POST", headers: { "content-type": "application/json" }, body: "{}",
       });
       const proposalPayload = await proposalResponse.json();
       if (!proposalResponse.ok) throw new Error(proposalPayload.error || "Proposal failed.");
-
-      setPackaging("Generating mockups…");
-      const mockupResponse = await fetch(`/api/audit-runs/${runId}/mockups`, { method: "POST" });
-      const mockupPayload = await mockupResponse.json();
-      if (!mockupResponse.ok) throw new Error(mockupPayload.error || "Mockups failed.");
 
       setDeliverables({
         recommendations: recPayload.recommendations ?? [],
@@ -225,10 +229,10 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
                 ? <><b className="critical">Not scored</b><small>{run.reachable === false ? "Site could not be read" : "Too little could be verified"}</small></>
                 : <><b>{run.overallScore}</b><small>overall score</small></>}
             </div>
-            <div className="engine-cost" title="Share of the rubric's total weight that was verified. Heavy checks count for more than light ones.">
+            <div className="engine-cost" title="Share of the rubric's total weight that was verified. Heavy checks count for more than light ones, and checks whose source was never in scope for this run are excluded from both figures.">
               <b>{run.confidence}%</b>
               <small>of rubric weight verified</small>
-              <small className="engine-subdetail">{run.checksVerified} of {run.checksTotal} checks</small>
+              <small className="engine-subdetail">{run.checksVerified} of {run.checksTotal} checks in scope</small>
             </div>
           </header>
 

@@ -88,6 +88,18 @@ export default function ProposalView({ token, ownerName }: { token: string; owne
                     <small>The minimum engagement applies.</small>
                   )}
                 </div>
+                {(() => {
+                  const links = JSON.parse((draft as unknown as { mockupLinks?: string }).mockupLinks || "[]") as Array<{ title: string; url: string }>;
+                  if (!links.length) return null;
+                  return (
+                    <div className="proposal-visuals">
+                      <p className="eyebrow">Concept pages</p>
+                      {links.map((link) => (
+                        <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.title} ↗</a>
+                      ))}
+                    </div>
+                  );
+                })()}
                 {parsedRetainer && (
                   <div className="proposal-retainer">
                     <div><strong>{parsedRetainer.label}</strong><small>{parsedRetainer.criteria}</small></div>

@@ -1,0 +1,1 @@
+ALTER TABLE `proposals` ADD `mockup_links` text DEFAULT '[]' NOT NULL;

@@ -47,6 +47,56 @@ times a counted quantity, then a sum.
 - **Crawl diagnostics** — final status, robots.txt fetchability, pages reached
   against pages attempted, and any blocking responses with their server headers.
 
+## Required credentials
+
+Every environment variable the audit and proposal paths read, what degrades
+without it, and how to set it.
+
+### Sign-in — the app is unusable without these four
+
+| Variable | Read by | Without it |
+| --- | --- | --- |
+| `AGENCYSIGNAL_LOGIN_EMAIL` | `app/dashboard-auth.ts` | Login always fails; every page and API returns 401. |
+| `AGENCYSIGNAL_PASSWORD_SALT` | `app/dashboard-auth.ts` | Same. |
+| `AGENCYSIGNAL_PASSWORD_HASH` | `app/dashboard-auth.ts` | Same. |
+| `AGENCYSIGNAL_SESSION_SECRET` | `app/dashboard-auth.ts` | Same. Rotating it signs out every existing session. |
+
+`npm run setup` generates all four. The password itself is never stored.
+
+### Audit — two keys, both worth having
+
+| Variable | Read by | Without it |
+| --- | --- | --- |
+| `PAGESPEED_API_KEY` | `lib/audit/collect-technical.ts` | PageSpeed applies its unkeyed quota and starts returning 429 in a batch. Lighthouse and Core Web Vitals checks retry, then report as not measured. Free, no billing details. |
+| `GOOGLE_PLACES_API_KEY` | `lib/audit/places.ts`, via the `google` and `service-lines` collectors | The profile cannot be read, so the service-line gap table — the point of the tool — stays empty, and no Google deliverable is priced. Billed per request. |
+
+```bash
+npm run auth:credentials -- --pagespeed-key KEY --places-key KEY
+```
+
+- **PageSpeed:** enable the PageSpeed Insights API in a Google Cloud project and
+  create an API key. No billing account is needed.
+  https://developers.google.com/speed/docs/insights/v5/get-started
+- **Places:** enable **Places API (New)** in the same project, attach a billing
+  account, and create a key. Restrict it to that one API. The field mask is
+  pinned in `lib/audit/places.ts` because Google bills by the SKU tier the
+  requested fields fall into.
+  https://console.cloud.google.com/apis/library/places.googleapis.com
+
+For the hosted runtime, set the same names as secrets — `npm run setup` prints
+them ready to paste.
+
+### Optional
+
+| Variable | Read by | Without it |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | `lib/audit/deliverables.ts` | Recommendation rationale and the proposal opening are composed deterministically from the findings instead of written by a model. Both obey the same voice constraints either way. |
+| `OPENAI_MODEL` | `lib/audit/deliverables.ts` | Defaults to `gpt-5.4-nano`. |
+| `AGENCYSIGNAL_OWNER_NAME` | `lib/runtime-env.ts` | The name on prospect-facing reports falls back to one derived from the login address. |
+
+A missing optional key never fails a run. A missing audit key lowers what the
+run covers, and the run says which checks it could not measure and why.
+
 ## Configuration
 
 | File | Controls |

@@ -296,6 +296,10 @@ export async function buildRunProposal(runId: number) {
     price: priced.totalMin,
     priceDisplay: formatFigure(config, { min: priced.totalMin, max: priced.totalMax }),
     retainer: retainer ? JSON.stringify({ ...retainer, display: formatFigure(config, retainer) }) : "",
+    // The opening references the concept pages, so the document links them.
+    // A reference the reader cannot follow is the same problem as one that
+    // describes an asset that does not exist.
+    mockupLinks: JSON.stringify(runMockups.map((mockup) => ({ kind: mockup.kind, title: mockup.title, url: `/mockup/${mockup.token}` }))),
     minimumApplied: priced.belowMinimum,
     timeline: "",
     tier: priced.lines[0].bandKey,

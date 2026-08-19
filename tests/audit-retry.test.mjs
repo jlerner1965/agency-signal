@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { backoffSeconds, retryPolicy, unverifiedReasons, confidenceOf } from "../lib/audit/scoring-config.js";
+import { backoffSeconds, retryPolicy, unverifiedReasons, confidenceOf, scopedChecks, minimumConfidence } from "../lib/audit/scoring-config.js";
 
 test("backoff grows exponentially and is capped", () => {
   assert.deepEqual([1, 2, 3, 4].map(backoffSeconds), [4, 8, 16, 32]);
@@ -43,4 +43,55 @@ test("technical is weighted below the categories that actually discriminate", as
   // technical score says little about whether a prospect is worth pitching.
   assert.ok(categoryWeights.Technical < categoryWeights.Conversion);
   assert.ok(categoryWeights.Technical < categoryWeights.Visibility);
+});
+
+// A withheld score must mean "not enough verified", never "a module was
+// switched off". These pin that distinction.
+
+test("a source that was never configured leaves the rubric entirely", () => {
+  const checks = [
+    { id: "a", weight: 10, status: "passed", earned: 10 },
+    { id: "b", weight: 10, status: "failed", earned: 0 },
+    { id: "gbp", weight: 20, status: "unverified", earned: 0, unverifiedReason: unverifiedReasons.SOURCE_UNAVAILABLE },
+  ];
+  // Without the exclusion this is 20/40 = 50% and the gate withholds a score
+  // purely because a key is absent.
+  assert.equal(scopedChecks(checks).length, 2);
+  assert.equal(confidenceOf(checks), 100);
+});
+
+test("a check with nothing to measure does not count against coverage", () => {
+  const checks = [
+    { id: "a", weight: 10, status: "passed", earned: 10 },
+    { id: "alt", weight: 10, status: "unverified", earned: 0, unverifiedReason: unverifiedReasons.NOT_APPLICABLE },
+  ];
+  assert.equal(confidenceOf(checks), 100);
+});
+
+test("a source we tried and gave up on still counts against coverage", () => {
+  const checks = [
+    { id: "a", weight: 10, status: "passed", earned: 10 },
+    { id: "psi", weight: 10, status: "unverified", earned: 0, unverifiedReason: unverifiedReasons.RETRIES_EXHAUSTED },
+  ];
+  assert.equal(scopedChecks(checks).length, 2);
+  assert.equal(confidenceOf(checks), 50);
+});
+
+test("the real no-Places-key shape clears the gate on covered work alone", () => {
+  // Weights taken from a real run: the Google module contributes 17 weight it
+  // can never verify without a key, and other modules add 23 more.
+  const verified = { id: "v", weight: 80, status: "passed", earned: 80 };
+  const gaveUp = { id: "psi", weight: 35, status: "unverified", earned: 0, unverifiedReason: unverifiedReasons.RETRIES_EXHAUSTED };
+  const switchedOff = { id: "gbp", weight: 40, status: "unverified", earned: 0, unverifiedReason: unverifiedReasons.SOURCE_UNAVAILABLE };
+
+  const asBuilt = Math.round((80 / 155) * 100);
+  assert.ok(asBuilt < minimumConfidence, "counting switched-off sources withheld every score");
+  assert.ok(confidenceOf([verified, gaveUp, switchedOff]) >= minimumConfidence, "covered work alone clears the gate");
+});
+
+test("an unreachable host still yields no rubric at all", () => {
+  // Nothing is in scope, so there is nothing to be confident about.
+  const checks = [{ id: "x", weight: 10, status: "unverified", earned: 0, unverifiedReason: unverifiedReasons.HOST_UNREACHABLE }];
+  assert.equal(scopedChecks(checks).length, 1, "an unreachable host is a failure to measure, not an out-of-scope source");
+  assert.equal(confidenceOf(checks), 0);
 });
