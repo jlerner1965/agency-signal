@@ -5,7 +5,8 @@ import { formatCents } from "@/lib/audit/cost-config";
 
 type RunModule = {
   id: number; module: string; label: string; status: string; message: string;
-  costCents: number; findingCount: number; attempts: number;
+  costCents: number; findingCount: number; attempts: number; maxAttempts: number;
+  retryAfter: string | null; retryReason: string; checkSummary: string;
 };
 
 type RunFinding = {
@@ -21,7 +22,25 @@ type Run = {
   error: string; finishedAt: string | null;
 };
 
-type Summary = { run: Run; modules: RunModule[]; findings: RunFinding[]; pending: boolean };
+type Summary = { run: Run; modules: RunModule[]; findings: RunFinding[]; pending: boolean; waitingFor: string | null; waitingReason: string };
+
+type Check = {
+  id: string; category: string; label: string; status: string;
+  weight: number; evidence: string; unverifiedReason?: string;
+};
+
+const UNMEASURED_REASON: Record<string, string> = {
+  "retries-exhausted": "the source kept failing after repeated attempts",
+  "source-unavailable": "the source was unavailable for this run",
+  "host-unreachable": "the site could not be read",
+  "not-applicable": "there was nothing on the page to measure",
+};
+
+/** Milliseconds until a deadline, clamped. Kept out of the component body so
+ *  the clock read is never treated as part of a render. */
+function msUntil(iso: string, capMs = 65_000) {
+  return Math.min(Math.max(0, new Date(iso).getTime() - Date.now()), capMs);
+}
 
 const MODULE_TONE: Record<string, string> = {
   Complete: "good", Running: "watch", Queued: "neutral",
@@ -33,6 +52,7 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
   const [history, setHistory] = useState<Run[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [waitNotice, setWaitNotice] = useState("");
   const cancelled = useRef(false);
 
   useEffect(() => () => { cancelled.current = true; }, []);
@@ -54,15 +74,29 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
     return () => { active = false; };
   }, [leadId]);
 
-  /** Ticks until the run reports nothing pending. Each tick runs one module. */
+  /**
+   * Ticks until the run reports nothing pending. Each tick runs one module.
+   * A module deferred by backoff reports when it may be retried, so the loop
+   * waits rather than spinning against a source that is already throttling us.
+   */
   async function drain(runId: number) {
-    for (let guard = 0; guard < 20; guard += 1) {
+    for (let guard = 0; guard < 40; guard += 1) {
       if (cancelled.current) return;
       const response = await fetch(`/api/audit-runs/${runId}/tick`, { method: "POST" });
-      const payload = await response.json();
+      const payload = (await response.json()) as Summary & { error?: string };
       if (!response.ok) throw new Error(payload.error || "The audit tick failed.");
       setSummary(payload);
       if (!payload.pending) return;
+
+      if (payload.waitingFor) {
+        const waitMs = msUntil(payload.waitingFor);
+        if (waitMs > 0) {
+          setWaitNotice(payload.waitingReason || "Waiting before the next attempt.");
+          await new Promise((resolve) => setTimeout(resolve, waitMs + 500));
+          if (cancelled.current) return;
+        }
+      }
+      setWaitNotice("");
     }
     throw new Error("The run did not finish within the expected number of steps.");
   }
@@ -104,6 +138,12 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
   const run = summary?.run;
   const unscored = run ? run.overallScore === null : false;
 
+  // Every check that did not run is shown explicitly; omission would read as a pass.
+  const unmeasured = (summary?.modules ?? []).flatMap((module) => {
+    try { return (JSON.parse(module.checkSummary || "[]") as Check[]).filter((check) => check.status === "unverified"); }
+    catch { return [] as Check[]; }
+  });
+
   return (
     <section className="engine-panel">
       <div className="audit-section-intro">
@@ -118,6 +158,7 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
       </div>
 
       {error && <p className="form-error" role="alert">{error}</p>}
+      {waitNotice && <p className="engine-waiting" role="status">Backing off before the next attempt — {waitNotice}</p>}
 
       {run && (
         <section className="engine-run">
@@ -132,9 +173,10 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
                 ? <><b className="critical">Not scored</b><small>{run.reachable === false ? "Site could not be read" : "Too little could be verified"}</small></>
                 : <><b>{run.overallScore}</b><small>overall score</small></>}
             </div>
-            <div className="engine-cost">
+            <div className="engine-cost" title="Share of the rubric's total weight that was verified. Heavy checks count for more than light ones.">
               <b>{run.confidence}%</b>
-              <small>{run.checksVerified} of {run.checksTotal} checks verified</small>
+              <small>of rubric weight verified</small>
+              <small className="engine-subdetail">{run.checksVerified} of {run.checksTotal} checks</small>
             </div>
             <div className="engine-cost">
               <b>{formatCents(run.costCents)}</b>
@@ -163,12 +205,34 @@ export default function AuditRunPanel({ leadId }: { leadId: number }) {
                   <small>{module.message || "Waiting to run."}</small>
                 </div>
                 <span className="engine-module-meta">
+                  {module.attempts > 1 && `attempt ${module.attempts}/${module.maxAttempts} · `}
                   {module.findingCount} finding{module.findingCount === 1 ? "" : "s"}
                   {module.costCents > 0 && ` · ${formatCents(module.costCents)}`}
                 </span>
               </li>
             ))}
           </ol>
+
+          {unmeasured.length > 0 && (
+            <div className="engine-unmeasured">
+              <p className="eyebrow">{unmeasured.length} checks not measured</p>
+              <p className="engine-unmeasured-note">
+                These are shown rather than omitted. An omitted check reads as a pass, and none of these were measured either way.
+              </p>
+              <ul>
+                {unmeasured.map((check) => (
+                  <li key={check.id}>
+                    <span className="engine-unmeasured-tag">Not measured</span>
+                    <div>
+                      <strong>{check.label}</strong>
+                      <small>{check.evidence}{check.unverifiedReason ? ` — ${UNMEASURED_REASON[check.unverifiedReason] ?? check.unverifiedReason}` : ""}</small>
+                    </div>
+                    <span className="engine-module-meta">weight {check.weight}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {summary.findings.length > 0 && (
             <div className="engine-findings">

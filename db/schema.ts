@@ -200,6 +200,12 @@ export const auditRunModules = sqliteTable("audit_run_modules", {
   costCents: integer("cost_cents").notNull().default(0),
   findingCount: integer("finding_count").notNull().default(0),
   payloadIds: text("payload_ids").notNull().default("[]"),
+  // Checks are stored, not recomputed, so an unmeasured check can be shown as
+  // an explicit gap rather than silently omitted from a report.
+  checkSummary: text("check_summary").notNull().default("[]"),
+  maxAttempts: integer("max_attempts").notNull().default(4),
+  retryAfter: text("retry_after"),
+  retryReason: text("retry_reason").notNull().default(""),
   sortOrder: integer("sort_order").notNull().default(0),
   startedAt: text("started_at"),
   finishedAt: text("finished_at"),

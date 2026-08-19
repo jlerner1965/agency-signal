@@ -16,7 +16,7 @@ const SECRET_KEYS = [
   "AGENCYSIGNAL_SESSION_SECRET",
 ];
 // Not a secret, but it belongs beside the login it names.
-const KEYS = [...SECRET_KEYS, "AGENCYSIGNAL_OWNER_NAME"];
+const KEYS = [...SECRET_KEYS, "AGENCYSIGNAL_OWNER_NAME", "PAGESPEED_API_KEY"];
 
 function base64Url(bytes) {
   return Buffer.from(bytes).toString("base64").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
@@ -113,6 +113,24 @@ const values = {
 if (flags["print-only"] === undefined) {
   await mergeDevVars(values);
   console.log(`Wrote ${DEV_VARS} — \`npm run dev\` can now sign in as ${email}.`);
+}
+
+// PageSpeed is free and its absence silently degrades every audit run, so it
+// is called out rather than buried in a list of optional variables.
+const pagespeedKey = (flags["pagespeed-key"] ?? "").trim();
+if (pagespeedKey) {
+  values.PAGESPEED_API_KEY = pagespeedKey;
+} else {
+  const existing = await readFile(DEV_VARS, "utf8").catch(() => "");
+  if (!/^PAGESPEED_API_KEY=.+/m.test(existing)) {
+    console.warn(
+      "\n\u26a0  PAGESPEED_API_KEY is not set.\n" +
+      "   Audit runs still work, but PageSpeed applies its unkeyed quota and starts\n" +
+      "   returning 429 in a batch, which leaves prospects unscored for no good reason.\n" +
+      "   The key is free and needs no billing details: https://developers.google.com/speed/docs/insights/v5/get-started\n" +
+      "   Then re-run: npm run auth:credentials -- --pagespeed-key YOUR_KEY\n",
+    );
+  }
 }
 
 console.log("\nSet these as secrets in the hosted runtime (never commit them):\n");

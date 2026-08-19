@@ -1,19 +1,22 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditRunModules, auditRuns, findings as findingsTable, leads, rawPayloads } from "@/db/schema";
 import { auditModules, missingRequirements, moduleById } from "@/lib/audit/registry";
-import { categoryWeights, clampScore, confidenceOf, minimumConfidence, orderFindings } from "@/lib/audit/scoring-config";
+import { backoffSeconds, categoryWeights, clampScore, confidenceOf, minimumConfidence, orderFindings, unverifiedReasons } from "@/lib/audit/scoring-config";
 import { runtimeValue } from "@/lib/runtime-env";
 import { collectTechnical } from "@/lib/audit/collect-technical";
 import { analyzeTechnical } from "@/lib/audit/analyze-technical";
 
 export type ModuleOutcome = {
-  status: "Complete" | "Skipped" | "Failed" | "Unreachable";
+  status: "Complete" | "Skipped" | "Failed" | "Unreachable" | "Retrying";
   message: string;
   findings: AuditFinding[];
   checks: AuditCheck[];
   costCents: number;
   payloadIds: number[];
+  /** Set when the outcome is Retrying: seconds to wait before the next attempt. */
+  retryInSeconds?: number;
+  retryReason?: string;
 };
 
 export const severities = ["High", "Medium", "Low"] as const;
@@ -39,19 +42,28 @@ export type AuditCheck = {
   weight: number;
   earned: number;
   evidence: string;
+  /** Why an unverified check could not be measured. Clients read these differently. */
+  unverifiedReason?: string;
 };
 
 export type StoredPayload = {
   source: string;
   requestKey: string;
   ok: boolean;
+  /** A throttle or transport error worth another attempt, not a verdict. */
+  retryable?: boolean;
   failureReason?: string;
   payload: unknown;
 };
 
-const collectors: Record<string, (website: string, keys: Record<string, string>) => Promise<{
+/** Returns today's stored payload for a request key, or null to go fetch it. */
+export type CacheLookup = (requestKey: string) => Promise<StoredPayload | null>;
+
+const collectors: Record<string, (website: string, keys: Record<string, string>, cached: CacheLookup) => Promise<{
   payloads: StoredPayload[];
   costCents: number;
+  networkCalls: number;
+  keyed: boolean;
 }>> = {
   technical: collectTechnical,
 };
@@ -90,6 +102,15 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * SQLite writes timestamps as "YYYY-MM-DD HH:MM:SS" in UTC. JavaScript parses
+ * that shape as local time, so it is made explicit before it reaches a client.
+ */
+function toIso(value: string | null | undefined) {
+  if (!value) return null;
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? `${value.replace(" ", "T")}Z` : value;
+}
+
 /** Keys a module might need, read once per tick from the worker environment. */
 async function availableKeys() {
   const names = ["PAGESPEED_API_KEY", "GOOGLE_PLACES_API_KEY", "SERP_API_KEY", "SERP_PROVIDER", "OPENAI_API_KEY"];
@@ -120,7 +141,12 @@ async function claimNextModule(runId: number) {
   const [candidate] = await db
     .select()
     .from(auditRunModules)
-    .where(and(eq(auditRunModules.runId, runId), eq(auditRunModules.status, "Queued")))
+    .where(and(
+      eq(auditRunModules.runId, runId),
+      eq(auditRunModules.status, "Queued"),
+      // A module inside its backoff window is not claimable yet.
+      sql`(${auditRunModules.retryAfter} IS NULL OR ${auditRunModules.retryAfter} <= datetime('now'))`,
+    ))
     .orderBy(auditRunModules.sortOrder)
     .limit(1);
   if (!candidate) return null;
@@ -147,13 +173,27 @@ async function cachedPayload(requestKey: string) {
   return row ?? null;
 }
 
+function cacheLookupFor(): CacheLookup {
+  return async (requestKey: string) => {
+    const row = await cachedPayload(requestKey);
+    // A cached failure is not reused: a throttled source deserves a real retry.
+    if (!row || !row.ok) return null;
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(row.payload); } catch { return null; }
+    return { source: row.source, requestKey: row.requestKey, ok: true, retryable: false, failureReason: "", payload: parsed };
+  };
+}
+
 async function storePayloads(runId: number, moduleId: string, payloads: StoredPayload[]) {
   const db = await getDb();
   const ids: number[] = [];
   const reused: string[] = [];
   for (const payload of payloads) {
-    const existing = await cachedPayload(payload.requestKey);
-    if (existing) {
+    // Only a successful payload is deduplicated. Each failed attempt is stored
+    // on its own so the retry history stays readable, and so a stale failure
+    // reason never stands in for a fresh one.
+    const existing = payload.ok ? await cachedPayload(payload.requestKey) : null;
+    if (existing && existing.ok) {
       ids.push(existing.id);
       reused.push(payload.source);
       continue;
@@ -175,21 +215,7 @@ async function storePayloads(runId: number, moduleId: string, payloads: StoredPa
   return { ids, reused };
 }
 
-async function loadPayloads(ids: number[]): Promise<StoredPayload[]> {
-  if (!ids.length) return [];
-  const db = await getDb();
-  const rows = await db.select().from(rawPayloads).where(inArray(rawPayloads.id, ids));
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  return ids.flatMap((id) => {
-    const row = byId.get(id);
-    if (!row) return [];
-    let parsed: unknown = null;
-    try { parsed = JSON.parse(row.payload); } catch { parsed = null; }
-    return [{ source: row.source, requestKey: row.requestKey, ok: row.ok, failureReason: row.failureReason, payload: parsed }];
-  });
-}
-
-async function runModule(runId: number, moduleId: string, website: string): Promise<ModuleOutcome> {
+async function runModule(runId: number, moduleId: string, website: string, attempts: number, maxAttempts: number): Promise<ModuleOutcome> {
   const definition = moduleById(moduleId);
   if (!definition) {
     return { status: "Failed", message: `Unknown module ${moduleId}.`, findings: [], checks: [], costCents: 0, payloadIds: [] };
@@ -212,7 +238,7 @@ async function runModule(runId: number, moduleId: string, website: string): Prom
 
   let collected;
   try {
-    collected = await collect(website, keys);
+    collected = await collect(website, keys, cacheLookupFor());
   } catch (error) {
     // A collector that throws is a module failure, never a run failure.
     return {
@@ -225,14 +251,40 @@ async function runModule(runId: number, moduleId: string, website: string): Prom
   const { ids, reused } = await storePayloads(runId, moduleId, collected.payloads);
   const analysis = normalizeAnalysis(analyze(collected.payloads));
   const note = reused.length ? ` Reused today's cached ${[...new Set(reused)].join(", ")}.` : "";
+
+  // A throttled or flaky source is worth another attempt before it is written
+  // off as unmeasurable. The site refusing us outright is not.
+  const retryable = collected.payloads.filter((payload) => !payload.ok && payload.retryable);
+  if (retryable.length && attempts < maxAttempts) {
+    const reason = retryable[0].failureReason ?? "A source failed transiently.";
+    return {
+      status: "Retrying",
+      message: `Attempt ${attempts} of ${maxAttempts} deferred: ${reason}`,
+      findings: [], checks: [],
+      costCents: collected.costCents,
+      payloadIds: ids,
+      retryInSeconds: backoffSeconds(attempts),
+      retryReason: reason,
+    };
+  }
+
+  const exhausted = retryable.length > 0;
+  const exhaustedNote = exhausted
+    ? ` Gave up on ${[...new Set(retryable.map((payload) => payload.source))].join(", ")} after ${maxAttempts} attempts; the checks they feed are reported as not measured.`
+    : "";
+
+  const reason = exhausted ? unverifiedReasons.RETRIES_EXHAUSTED : unverifiedReasons.SOURCE_UNAVAILABLE;
+  const checks = analysis.checks.map((check) => check.status === "unverified"
+    ? { ...check, unverifiedReason: analysis.reachable ? reason : unverifiedReasons.HOST_UNREACHABLE }
+    : check);
+
   return {
     // An unreachable site is its own status. It must never read as a low score.
     status: analysis.reachable ? "Complete" : "Unreachable",
-    message: `${analysis.message}${note}`,
+    message: `${analysis.message}${note}${exhaustedNote}`,
     findings: analysis.findings,
-    checks: analysis.checks,
-    // Cached payloads cost nothing the second time.
-    costCents: reused.length ? 0 : collected.costCents,
+    checks,
+    costCents: collected.costCents,
     payloadIds: ids,
   };
 }
@@ -255,9 +307,40 @@ export async function tickAuditRun(runId: number) {
   }
 
   const claimed = await claimNextModule(runId);
-  if (!claimed) return finalizeRun(runId);
+  if (!claimed) {
+    // Nothing claimable is not the same as nothing left: a module inside its
+    // backoff window still has work to do.
+    const [waiting] = await db
+      .select()
+      .from(auditRunModules)
+      .where(and(eq(auditRunModules.runId, runId), eq(auditRunModules.status, "Queued")))
+      .orderBy(auditRunModules.retryAfter)
+      .limit(1);
+    if (waiting) return { ...(await summarizeRun(runId)), waitingFor: toIso(waiting.retryAfter), waitingReason: waiting.retryReason };
+    return finalizeRun(runId);
+  }
 
-  const outcome = await runModule(runId, claimed.module, run.website);
+  const outcome = await runModule(runId, claimed.module, run.website, claimed.attempts, claimed.maxAttempts);
+
+  // A retryable failure goes back on the queue rather than ending the module.
+  if (outcome.status === "Retrying") {
+    const delay = Math.max(1, Math.round(outcome.retryInSeconds ?? 5));
+    const [requeued] = await db.update(auditRunModules).set({
+      status: "Queued",
+      message: outcome.message.slice(0, 500),
+      costCents: sql`${auditRunModules.costCents} + ${outcome.costCents}`,
+      payloadIds: JSON.stringify(outcome.payloadIds),
+      retryAfter: sql`datetime('now', ${`+${delay} seconds`})`,
+      retryReason: (outcome.retryReason ?? "").slice(0, 300),
+    }).where(eq(auditRunModules.id, claimed.id)).returning();
+    await db.update(auditRuns).set({ updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(auditRuns.id, runId));
+    return {
+      ...(await summarizeRun(runId)),
+      waitingFor: toIso(requeued?.retryAfter),
+      waitingReason: outcome.retryReason ?? "",
+    };
+  }
+
   const ordered = orderFindings(outcome.findings);
 
   if (ordered.length) {
@@ -281,9 +364,12 @@ export async function tickAuditRun(runId: number) {
   await db.update(auditRunModules).set({
     status: outcome.status,
     message: outcome.message.slice(0, 500),
-    costCents: outcome.costCents,
+    costCents: sql`${auditRunModules.costCents} + ${outcome.costCents}`,
     findingCount: ordered.length,
     payloadIds: JSON.stringify(outcome.payloadIds),
+    // Stored, not recomputed, so an unmeasured check can be shown as a gap.
+    checkSummary: JSON.stringify(outcome.checks),
+    retryAfter: null,
     finishedAt: sql`CURRENT_TIMESTAMP`,
   }).where(eq(auditRunModules.id, claimed.id));
 
@@ -306,18 +392,12 @@ export async function tickAuditRun(runId: number) {
 async function finalizeRun(runId: number) {
   const db = await getDb();
   const moduleRows = await db.select().from(auditRunModules).where(eq(auditRunModules.runId, runId)).orderBy(auditRunModules.sortOrder);
-  const payloadIds = moduleRows.flatMap((row) => {
-    try { return JSON.parse(row.payloadIds) as number[]; } catch { return []; }
-  });
-  const payloads = await loadPayloads(payloadIds);
 
-  const checks: AuditCheck[] = [];
-  for (const row of moduleRows) {
-    const analyze = analyzers[row.module];
-    if (!analyze || row.status === "Skipped" || row.status === "Failed") continue;
-    const modulePayloads = payloads.filter((payload) => payload.requestKey.startsWith(`${row.module}:`));
-    try { checks.push(...normalizeAnalysis(analyze(modulePayloads)).checks); } catch { /* a module that cannot re-analyze contributes nothing */ }
-  }
+  // Checks were stored when each module ran, so scoring reads exactly what was
+  // measured rather than re-deriving it from payloads.
+  const checks: AuditCheck[] = moduleRows.flatMap((row) => {
+    try { return JSON.parse(row.checkSummary) as AuditCheck[]; } catch { return []; }
+  });
 
   const byCategory = new Map<string, AuditCheck[]>();
   for (const check of checks) {
@@ -389,5 +469,5 @@ export async function summarizeRun(runId: number) {
   const modules = await db.select().from(auditRunModules).where(eq(auditRunModules.runId, runId)).orderBy(auditRunModules.sortOrder);
   const runFindings = await db.select().from(findingsTable).where(eq(findingsTable.runId, runId)).orderBy(findingsTable.sortOrder);
   const pending = modules.some((module) => module.status === "Queued" || module.status === "Running");
-  return { run, modules, findings: runFindings, pending, justFinished: false };
+  return { run, modules, findings: runFindings, pending, justFinished: false, waitingFor: null as string | null, waitingReason: "" };
 }

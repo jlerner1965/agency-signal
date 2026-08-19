@@ -1,6 +1,6 @@
 import { safeAuditUrl } from "@/lib/website-inspection";
 import { costOf } from "@/lib/audit/cost-config";
-import type { StoredPayload } from "@/lib/audit/runner";
+import type { CacheLookup, StoredPayload } from "@/lib/audit/runner";
 
 const USER_AGENT = "AgencySignal-Audit/4.0 (+https://agencysignal.app/crawler)";
 const FETCH_TIMEOUT_MS = 20_000;
@@ -20,6 +20,10 @@ function describeBlock(status: number, server: string, body: string) {
   return "";
 }
 
+function isRetryableStatus(status: number) {
+  return status === 429 || (status >= 500 && status < 600);
+}
+
 async function fetchDocument(url: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -33,9 +37,9 @@ async function fetchDocument(url: string) {
     const server = response.headers.get("server") ?? "";
     const body = contentType.includes("text/html") ? (await response.text()).slice(0, 1_500_000) : "";
     const blocked = describeBlock(response.status, server, body);
-    if (blocked) return { ok: false as const, reason: blocked, status: response.status, finalUrl: response.url || url, server, html: "" };
+    if (blocked) return { ok: false as const, reason: blocked, retryable: isRetryableStatus(response.status), status: response.status, finalUrl: response.url || url, server, html: "" };
     if (!contentType.includes("text/html")) {
-      return { ok: false as const, reason: `The URL returned ${contentType || "an unknown content type"} rather than an HTML page.`, status: response.status, finalUrl: response.url || url, server, html: "" };
+      return { ok: false as const, reason: `The URL returned ${contentType || "an unknown content type"} rather than an HTML page.`, retryable: false, status: response.status, finalUrl: response.url || url, server, html: "" };
     }
     return {
       ok: true as const,
@@ -47,10 +51,12 @@ async function fetchDocument(url: string) {
       contentType,
     };
   } catch (error) {
-    const reason = error instanceof Error && error.name === "AbortError"
+    const timedOut = error instanceof Error && error.name === "AbortError";
+    const reason = timedOut
       ? `The site did not respond within ${FETCH_TIMEOUT_MS / 1000} seconds.`
       : `The site could not be reached: ${error instanceof Error ? error.message : "unknown network error"}.`;
-    return { ok: false as const, reason, status: 0, finalUrl: url, server: "", html: "" };
+    // A timeout or transport error may be transient, so it is worth retrying.
+    return { ok: false as const, reason, retryable: true, status: 0, finalUrl: url, server: "", html: "" };
   } finally {
     clearTimeout(timer);
   }
@@ -66,70 +72,103 @@ async function fetchPageSpeed(url: string, strategy: "mobile" | "desktop", apiKe
     const response = await fetch(`https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed?${params}`, { signal: controller.signal });
     if (!response.ok) {
       const detail = response.status === 429
-        ? "PageSpeed rate-limited the request. Configure PAGESPEED_API_KEY to raise the quota."
+        ? `PageSpeed rate-limited the request${apiKey ? "" : " (no API key configured, so the unkeyed quota applies)"}.`
         : `PageSpeed returned HTTP ${response.status}.`;
-      return { ok: false as const, reason: detail, payload: null };
+      return { ok: false as const, reason: detail, retryable: isRetryableStatus(response.status), payload: null };
     }
-    return { ok: true as const, reason: "", payload: await response.json() };
+    return { ok: true as const, reason: "", retryable: false, payload: await response.json() };
   } catch (error) {
-    return { ok: false as const, reason: `PageSpeed did not respond: ${error instanceof Error ? error.message : "unknown error"}.`, payload: null };
+    return { ok: false as const, reason: `PageSpeed did not respond: ${error instanceof Error ? error.message : "unknown error"}.`, retryable: true, payload: null };
   } finally {
     clearTimeout(timer);
   }
 }
 
-export async function collectTechnical(website: string, keys: Record<string, string>) {
+export async function collectTechnical(website: string, keys: Record<string, string>, cached: CacheLookup) {
   const requested = safeAuditUrl(website);
   const target = requested.toString();
   const payloads: StoredPayload[] = [];
+  let networkCalls = 0;
 
-  const document = await fetchDocument(target);
-  payloads.push({
-    source: "document",
-    requestKey: `technical:document:${target}`,
-    ok: document.ok,
-    failureReason: document.ok ? "" : document.reason,
-    payload: document.ok
-      ? { status: document.status, finalUrl: document.finalUrl, server: document.server, redirected: document.redirected, html: document.html }
-      : { status: document.status, finalUrl: document.finalUrl, server: document.server },
-  });
+  const documentKey = `technical:document:${target}`;
+  // The cache is consulted before the network, not after it, so a retry of a
+  // throttled module never re-fetches what we already have for today.
+  const cachedDocument = await cached(documentKey);
+  let document: Awaited<ReturnType<typeof fetchDocument>> | null = null;
+  if (cachedDocument) {
+    payloads.push(cachedDocument);
+  } else {
+    document = await fetchDocument(target);
+    networkCalls += 1;
+    payloads.push({
+      source: "document",
+      requestKey: documentKey,
+      ok: document.ok,
+      retryable: document.ok ? false : document.retryable,
+      failureReason: document.ok ? "" : document.reason,
+      payload: document.ok
+        ? { status: document.status, finalUrl: document.finalUrl, server: document.server, redirected: document.redirected, html: document.html }
+        : { status: document.status, finalUrl: document.finalUrl, server: document.server },
+    });
+  }
+
+  const documentPayload = payloads[0];
+  const documentOk = documentPayload.ok;
+  const finalUrl = (documentPayload.payload as { finalUrl?: string } | null)?.finalUrl ?? target;
 
   // A 404 probe only means anything if the site answered the homepage at all.
-  if (document.ok) {
-    const probeUrl = new URL(`/agencysignal-404-probe-${Date.now().toString(36)}`, document.finalUrl).toString();
-    const probe = await fetchDocument(probeUrl);
-    payloads.push({
-      source: "notfound-probe",
-      requestKey: `technical:notfound:${target}`,
-      ok: true,
-      payload: { status: probe.status, hasBody: Boolean(probe.html), length: probe.html.length },
-    });
+  const probeKey = `technical:notfound:${target}`;
+  if (documentOk) {
+    const cachedProbe = await cached(probeKey);
+    if (cachedProbe) {
+      payloads.push(cachedProbe);
+    } else {
+      const probeUrl = new URL(`/agencysignal-404-probe-${Date.now().toString(36)}`, finalUrl).toString();
+      const probe = await fetchDocument(probeUrl);
+      networkCalls += 1;
+      payloads.push({
+        source: "notfound-probe",
+        requestKey: probeKey,
+        ok: true,
+        retryable: false,
+        payload: { status: probe.status, hasBody: Boolean(probe.html), length: probe.html.length },
+      });
+    }
   }
 
   const apiKey = keys.PAGESPEED_API_KEY ?? "";
   let pagespeedCalls = 0;
   for (const strategy of ["mobile", "desktop"] as const) {
+    const psiKey = `technical:psi:${strategy}:${target}`;
     // No point asking Google to render a page our own fetch could not reach.
-    if (!document.ok) {
+    if (!documentOk) {
       payloads.push({
         source: `pagespeed-${strategy}`,
-        requestKey: `technical:psi:${strategy}:${target}`,
+        requestKey: psiKey,
         ok: false,
+        retryable: false,
         failureReason: "Skipped because the page itself could not be fetched.",
         payload: null,
       });
       continue;
     }
-    const result = await fetchPageSpeed(document.finalUrl, strategy, apiKey);
+    const cachedPsi = await cached(psiKey);
+    if (cachedPsi) {
+      payloads.push(cachedPsi);
+      continue;
+    }
+    const result = await fetchPageSpeed(finalUrl, strategy, apiKey);
     pagespeedCalls += 1;
+    networkCalls += 1;
     payloads.push({
       source: `pagespeed-${strategy}`,
-      requestKey: `technical:psi:${strategy}:${target}`,
+      requestKey: psiKey,
       ok: result.ok,
+      retryable: result.retryable,
       failureReason: result.reason,
       payload: result.payload,
     });
   }
 
-  return { payloads, costCents: costOf("pagespeed", pagespeedCalls) };
+  return { payloads, costCents: costOf("pagespeed", pagespeedCalls), networkCalls, keyed: Boolean(apiKey) };
 }

@@ -164,3 +164,28 @@ test("a fully measured site clears the confidence gate", async () => {
 test("confidence is zero when there is nothing to measure", () => {
   assert.equal(confidenceOf([]), 0);
 });
+
+test("confidence is weighted by the rubric, so trivial checks cannot carry a run", () => {
+  // Twelve cheap checks verified and every heavy one unmeasured. Counting
+  // checks would clear the gate at 67%; weighting rejects it. Phase 2 roughly
+  // doubles the rubric, so this stays pinned.
+  const trivial = Array.from({ length: 12 }, (_, index) => ({ id: `trivial-${index}`, weight: 1, status: "passed", earned: 1 }));
+  const heavy = [["lh-performance", 6], ["lh-accessibility", 5], ["lh-seo", 4], ["cwv-lcp", 4], ["https", 5], ["viewport", 4]]
+    .map(([id, weight]) => ({ id, weight, status: "unverified", earned: 0 }));
+  const checks = [...trivial, ...heavy];
+
+  const byCount = Math.round((trivial.length / checks.length) * 100);
+  assert.ok(byCount >= minimumConfidence, "the count-based figure would have cleared the gate");
+  assert.ok(confidenceOf(checks) < minimumConfidence, "the weighted figure must reject it");
+  assert.equal(confidenceOf(checks), 30);
+});
+
+test("confidence weights match the weights the score uses", () => {
+  // Same checks, same weights: a half-weight run reads as half confidence.
+  const checks = [
+    { id: "heavy", weight: 10, status: "passed", earned: 10 },
+    { id: "light", weight: 10, status: "unverified", earned: 0 },
+  ];
+  assert.equal(confidenceOf(checks), 50);
+  assert.equal(scoreChecks(checks), 100);
+});

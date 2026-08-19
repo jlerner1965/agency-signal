@@ -625,6 +625,8 @@ td { height: 70px; font-size: 12px; }
 .engine-score b.critical { color: #a63d38; font-size: 13px; }
 .engine-cost b { color: #40505f; font-size: 13px; font-variant-numeric: tabular-nums; }
 .engine-score small, .engine-cost small { color: #84909d; font-size: 8px; }
+.engine-subdetail { color: #9aa5b1; }
+.engine-waiting { margin: 0; padding: 10px 14px; border-radius: 7px; background: #fdf6e6; color: #86601a; font-size: 9px; line-height: 1.55; }
 .engine-warning { margin: 0; padding: 12px 14px; border-radius: 7px; background: #fdf0ee; color: #93372f; font-size: 9px; line-height: 1.55; }
 
 .engine-modules { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; background: #edf0f2; border: 1px solid #edf0f2; border-radius: 7px; overflow: hidden; }
@@ -637,6 +639,14 @@ td { height: 70px; font-size: 12px; }
 .engine-modules strong { display: block; font-size: 10px; }
 .engine-modules small { color: #75808f; font-size: 8px; line-height: 1.5; }
 .engine-module-meta { color: #84909d; font-size: 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.engine-unmeasured { padding: 14px 16px; border: 1px dashed #d5dde3; border-radius: 7px; background: #fbfcfd; }
+.engine-unmeasured-note { margin: 4px 0 10px; color: #7b8794; font-size: 8px; line-height: 1.5; }
+.engine-unmeasured ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.engine-unmeasured li { display: grid; grid-template-columns: 88px 1fr auto; gap: 12px; align-items: center; }
+.engine-unmeasured-tag { padding: 3px 0; border-radius: 4px; background: #eef1f4; color: #6d7885; text-align: center; font-size: 8px; font-weight: 850; text-transform: uppercase; letter-spacing: .05em; }
+.engine-unmeasured strong { display: block; font-size: 10px; color: #40505f; }
+.engine-unmeasured small { color: #7b8794; font-size: 8px; line-height: 1.5; }
 
 .engine-findings { display: grid; gap: 10px; }
 .engine-findings article { padding: 14px 16px; border: 1px solid #e6ebee; border-radius: 7px; }
@@ -655,6 +665,6 @@ td { height: 70px; font-size: 12px; }
 @media (max-width: 600px) {
   .engine-run > header { grid-template-columns: 1fr; gap: 12px; }
   .engine-score, .engine-cost { justify-items: start; text-align: left; }
-  .engine-modules li { grid-template-columns: 84px 1fr; }
+  .engine-modules li, .engine-unmeasured li { grid-template-columns: 84px 1fr; }
   .engine-module-meta { grid-column: 2; }
 }
