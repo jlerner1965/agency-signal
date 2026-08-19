@@ -151,13 +151,19 @@ The hosted runtime applies the migrations packaged into `dist/.openai/drizzle`
 on deploy. `npm run db:migrate` applies the same files locally and is safe to
 re-run.
 
+## Deploying
+
+`docs/deploy.md` covers it end to end: the preflight gates and what a pass looks
+like, the secrets the runtime needs, which migrations mutate data, and how to
+verify a deploy once it is live.
+
 ## Directories
 
 ```text
 app/                Pages and API routes
 config/             Pricing tiers and the proposal voice sample
 db/                 Drizzle schema and D1 access
-docs/               Handover notes and the original implementation plan
+docs/               Deployment guide, handover notes, implementation plan
 drizzle/            Generated and hand-written migrations
 lib/audit/          The audit engine: runner, modules, config, deliverables
 lib/                Shared types and helpers
