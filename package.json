@@ -18,7 +18,8 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "db:migrate": "bash scripts/sites-env.sh -- node scripts/db-migrate.mjs",
     "db:migrate:remote": "node scripts/db-migrate.mjs --remote",
-    "deploy": "node scripts/deploy-cloudflare.mjs"
+    "deploy": "node scripts/deploy-cloudflare.mjs",
+    "setup:cloudflare": "node scripts/setup-cloudflare.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

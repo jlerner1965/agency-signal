@@ -30,8 +30,13 @@ const root = resolve(import.meta.dirname, "..");
 const generated = resolve(root, "dist/server/wrangler.json");
 const patched = resolve(root, "dist/server/wrangler.deploy.json");
 
-const flags = new Set(process.argv.slice(2).filter((value) => value.startsWith("--")));
+const argv = process.argv.slice(2);
+const flags = new Set(argv.filter((value) => value.startsWith("--")));
 const dryRun = flags.has("--dry-run");
+// Uploads secrets as part of the deploy, so a first run does not need a
+// separate prompt per secret. Additive: secrets already set and not named here
+// are left alone.
+const secretsFile = (argv.find((value) => value.startsWith("--secrets-file=")) ?? "").split("=")[1] ?? "";
 
 const databaseId = (process.env.CLOUDFLARE_D1_DATABASE_ID ?? "").trim();
 const workerName = (process.env.CLOUDFLARE_WORKER_NAME ?? "agency-signal").trim();
@@ -85,7 +90,8 @@ console.log("\nDeploying…\n");
 try {
   const { stdout, stderr } = await run(
     process.execPath,
-    [resolve(root, "node_modules/wrangler/bin/wrangler.js"), "deploy", "--config", patched],
+    [resolve(root, "node_modules/wrangler/bin/wrangler.js"), "deploy", "--config", patched,
+      ...(secretsFile ? ["--secrets-file", secretsFile] : [])],
     { cwd: root, maxBuffer: 32 * 1024 * 1024 },
   );
   process.stdout.write(stdout);
