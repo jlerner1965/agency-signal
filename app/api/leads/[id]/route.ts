@@ -1,10 +1,11 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, auditFindings, audits, competitorAudits, leads, proposals, reportEvents } from "@/db/schema";
+import { activities, auditRunModules, auditRuns, competitorAudits, findings as engineFindings, leads, proposals, rawPayloads, reportEvents } from "@/db/schema";
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildOpportunity } from "@/lib/opportunity";
 import { nextSequenceDate, qualificationLabel, salesStages } from "@/lib/sales";
 import { compareAudits } from "@/lib/audit-history";
+import { findingsFromRun, summaryFromRun } from "@/lib/audit/run-summary";
 
 const allowedStatuses = new Set(salesStages);
 const textFields = ["contactName", "email", "phone", "carrier", "businessObjective", "painPoint", "currentProvider", "decisionMaker", "budgetRange", "desiredTimeline", "nextCommittedStep", "objection", "lossReason"] as const;
@@ -143,10 +144,55 @@ export async function GET(
     const db = await getDb();
     const [lead] = await db.select().from(leads).where(eq(leads.id, id)).limit(1);
     if (!lead) return Response.json({ error: "Lead not found" }, { status: 404 });
-    const auditHistory = await db.select().from(audits).where(eq(audits.leadId, id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(8);
+    // The engine's runs, not the legacy `audits` table. Nothing has written
+    // that table since the old /api/audit path was removed, so every tab
+    // reading it — Summary, Website, Blueprint, and the proposal built from the
+    // prospect — reported a site that had never been audited while the Audit
+    // engine tab beside them listed the findings from the run that had just
+    // finished.
+    const runRows = await db.select().from(auditRuns)
+      .where(and(eq(auditRuns.leadId, id), isNotNull(auditRuns.finishedAt)))
+      .orderBy(desc(auditRuns.id)).limit(8);
+
+    // Only the two newest are compared, so only those need their checks read.
+    const moduleRows = runRows.length
+      ? await db.select().from(auditRunModules)
+        .where(inArray(auditRunModules.runId, runRows.slice(0, 2).map((row) => row.id)))
+        .orderBy(auditRunModules.sortOrder)
+      : [];
+    const modulesFor = (runId: number) => moduleRows.filter((module) => module.runId === runId);
+
+    // The crawl's own account of what it reached, which is where the page count
+    // comes from. Attempted is not reached, and the summary says reached.
+    let diagnostics: { pagesReached?: number } | null = null;
+    if (runRows.length) {
+      const payloadIds = modulesFor(runRows[0].id).flatMap((module) => {
+        try { return JSON.parse(module.payloadIds) as number[]; } catch { return []; }
+      });
+      if (payloadIds.length) {
+        const [crawlRow] = await db.select().from(rawPayloads)
+          .where(and(inArray(rawPayloads.id, payloadIds), eq(rawPayloads.source, "crawl")))
+          .orderBy(desc(rawPayloads.id)).limit(1);
+        try {
+          diagnostics = crawlRow
+            ? (JSON.parse(crawlRow.payload) as { diagnostics?: { pagesReached?: number } }).diagnostics ?? null
+            : null;
+        } catch { diagnostics = null; }
+      }
+    }
+
+    const auditHistory = runRows.map((row, index) => summaryFromRun(
+      row,
+      modulesFor(row.id),
+      // Pages reached is worth the payload read for the run on screen; the
+      // older entries in the history list only print a score and a date.
+      index === 0 ? diagnostics : null,
+    ));
     const latestAudit = auditHistory[0] ?? null;
-    const findings = latestAudit
-      ? await db.select().from(auditFindings).where(eq(auditFindings.auditId, latestAudit.id)).orderBy(auditFindings.sortOrder)
+    const findings = runRows.length
+      ? findingsFromRun(await db.select().from(engineFindings)
+        .where(eq(engineFindings.runId, runRows[0].id))
+        .orderBy(engineFindings.sortOrder))
       : [];
     const activityRows = await db.select().from(activities).where(eq(activities.leadId, id)).orderBy(desc(activities.createdAt), desc(activities.id)).limit(30);
     const eventRows = await db.select().from(reportEvents).where(eq(reportEvents.leadId, id)).orderBy(desc(reportEvents.createdAt), desc(reportEvents.id)).limit(30);

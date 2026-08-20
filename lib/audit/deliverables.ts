@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { auditRunModules, auditRuns, findings as findingsTable, leads, mockups, proposals, rawPayloads, recommendations } from "@/db/schema";
 import { assertEvidence, buildRecommendations, groundRationale } from "@/lib/audit/recommendations";
 import { buildVoicePrompt, composeOpening, hasSendableHook, planFromFindings, selectOpeningFindings, validateVoice } from "@/lib/audit/proposal-voice";
-import { extractBrandTokens } from "@/lib/audit/brand";
+import { brandSourceFromCrawl, extractBrandTokens } from "@/lib/audit/brand";
 import { buildHomepageMockup, buildServicePageMockup, readMockupContent } from "@/lib/audit/mockup";
 import { detectRegister } from "@/lib/audit/register";
 import { runtimeValue } from "@/lib/runtime-env";
@@ -445,7 +445,6 @@ export async function buildRunMockups(runId: number) {
   if (!crawl?.ok) throw new Error("The site could not be read, so there are no brand tokens to build from.");
 
   const pages = (crawl.payload as { pages?: Array<Record<string, unknown>> })?.pages ?? [];
-  const home = pages[0] as { url?: string; rawHead?: string } | undefined;
   const places = payloads.find((payload) => payload.source === "places")?.payload as {
     nationalPhoneNumber?: string;
     formattedAddress?: string;
@@ -454,12 +453,15 @@ export async function buildRunMockups(runId: number) {
     types?: string[];
   } | null;
 
-  // Inline markup plus the site's own stylesheets: the palette usually lives
-  // in the latter, and a mockup in default colours is not recognisably theirs.
-  const crawlPayload = crawl.payload as { homeCss?: string } | null;
-  const brandSource = `${String(home?.rawHead ?? "")}\n${String(crawlPayload?.homeCss ?? "")}`;
+  // Read out of the payload by the one function that knows its shape. Doing it
+  // inline here is how a reader — human or otherwise — reaches for `html`, the
+  // field the crawler uses before the collectors distil each page, and quietly
+  // loses the logo.
+  const { source: brandSource, url: homeUrl } = brandSourceFromCrawl(
+    crawl.payload as { pages?: Array<Record<string, unknown>>; homeCss?: string } | null,
+  );
   const brand = {
-    ...extractBrandTokens(brandSource, home?.url ?? run.website, lead?.agencyName ?? ""),
+    ...extractBrandTokens(brandSource, homeUrl || run.website, lead?.agencyName ?? ""),
     city: lead?.city ?? "",
     phone: places?.nationalPhoneNumber ?? lead?.phone ?? "",
     address: places?.formattedAddress ?? "",

@@ -537,11 +537,19 @@ async function finalizeRun(runId: number) {
 
   // Only a genuinely scored run may touch the prospect's headline numbers.
   if (overall !== null) {
+    // All four categories, not Technical alone. The prospect list shows the
+    // overall score and the Website tab shows the breakdown, so writing one
+    // category left that tab reporting a scored site as zero for Visibility,
+    // Conversion and Trust. A category this run could not measure keeps
+    // whatever the last run that could measure it wrote.
     await db.update(leads).set({
       score: overall,
       scoreSource: "engine",
       scoreConfidence: confidence,
+      visibilityScore: subscores.Visibility ?? sql`${leads.visibilityScore}`,
+      conversionScore: subscores.Conversion ?? sql`${leads.conversionScore}`,
       technicalScore: subscores.Technical ?? sql`${leads.technicalScore}`,
+      trustScore: subscores.Trust ?? sql`${leads.trustScore}`,
       lastAuditAt: sql`CURRENT_TIMESTAMP`,
       updatedAt: sql`CURRENT_TIMESTAMP`,
     }).where(eq(leads.id, run.leadId));
