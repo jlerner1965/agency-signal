@@ -8,7 +8,9 @@ import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 
 const PBKDF2_ITERATIONS = 100_000;
-const DEV_VARS = resolve(import.meta.dirname, "..", ".dev.vars");
+// Overridable so the test suite can exercise the merge without writing over a
+// developer's real .dev.vars. Nothing in normal use sets it.
+const DEV_VARS = process.env.AGENCYSIGNAL_DEV_VARS || resolve(import.meta.dirname, "..", ".dev.vars");
 const SECRET_KEYS = [
   "AGENCYSIGNAL_LOGIN_EMAIL",
   "AGENCYSIGNAL_PASSWORD_SALT",
@@ -73,7 +75,10 @@ async function prompt(question, { silent = false } = {}) {
   return answer;
 }
 
-// Preserves unrelated lines so re-running does not discard other local vars.
+// Preserves every line this run is not writing, so adding one key never
+// discards another. Rewriting only the keys actually supplied is the whole
+// point: filtering on the full managed list dropped a key that was already set
+// but not passed again, which is a silent way to lose an API key.
 async function mergeDevVars(values) {
   let existing = "";
   try {
@@ -81,14 +86,41 @@ async function mergeDevVars(values) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
+  const writing = KEYS.filter((key) => values[key]);
   const kept = existing
     .split("\n")
-    .filter((line) => line.trim() && !KEYS.some((key) => line.startsWith(`${key}=`)));
-  const written = KEYS.filter((key) => values[key]).map((key) => `${key}=${values[key]}`);
+    .filter((line) => line.trim() && !writing.some((key) => line.startsWith(`${key}=`)));
+  const written = writing.map((key) => `${key}=${values[key]}`);
   await writeFile(DEV_VARS, `${[...kept, ...written].join("\n")}\n`, { mode: 0o600 });
 }
 
 const flags = readFlags(process.argv.slice(2));
+
+const API_KEY_FLAGS = { "pagespeed-key": "PAGESPEED_API_KEY", "places-key": "GOOGLE_PLACES_API_KEY" };
+const currentVars = await readFile(DEV_VARS, "utf8").catch(() => "");
+const isSet = (key) => new RegExp(`^${key}=.+`, "m").test(currentVars);
+
+// Adding an API key is not a request to rotate the sign-in. Doing both would
+// regenerate the session secret and sign every existing session out, which is
+// not what `--pagespeed-key KEY` looks like it does — and it is the command the
+// README gives for adding a key later.
+const keysOnly = Object.keys(API_KEY_FLAGS).some((flag) => (flags[flag] ?? "").trim())
+  && flags.email === undefined
+  && flags.password === undefined;
+
+if (keysOnly && SECRET_KEYS.every(isSet)) {
+  const added = {};
+  for (const [flag, name] of Object.entries(API_KEY_FLAGS)) {
+    const provided = (flags[flag] ?? "").trim();
+    if (provided) added[name] = provided;
+  }
+  if (flags["print-only"] === undefined) await mergeDevVars(added);
+  console.log(`Added ${Object.keys(added).join(", ")} to ${DEV_VARS}. The existing login is unchanged.`);
+  console.log("\nSet the same names in the hosted runtime:\n");
+  for (const name of Object.keys(added)) console.log(`  npx wrangler secret put ${name} --name agency-signal`);
+  process.exit(0);
+}
+
 const email = (flags.email ?? (await prompt("Login email: "))).trim().toLowerCase();
 const password = flags.password ?? (await prompt("Password (min 12 characters): ", { silent: true }));
 
@@ -113,9 +145,6 @@ const values = {
 // Both API keys are prompted for rather than left to be discovered later: one
 // is free and its absence silently degrades every run, and the other is what
 // makes the service-line gap analysis possible at all.
-const existingVars = await readFile(DEV_VARS, "utf8").catch(() => "");
-const alreadySet = (key) => new RegExp(`^${key}=.+`, "m").test(existingVars);
-
 const API_KEYS = [
   {
     name: "PAGESPEED_API_KEY",
@@ -142,7 +171,7 @@ const API_KEYS = [
 for (const key of API_KEYS) {
   const provided = (flags[key.flag] ?? "").trim();
   if (provided) { values[key.name] = provided; continue; }
-  if (alreadySet(key.name)) continue;
+  if (isSet(key.name)) continue;
   const entered = stdin.isTTY && flags.email === undefined ? (await prompt(key.prompt)).trim() : "";
   if (entered) { values[key.name] = entered; continue; }
   console.warn(`\n${key.warning}\n   Add it later with: npm run auth:credentials -- --${key.flag} YOUR_KEY\n`);

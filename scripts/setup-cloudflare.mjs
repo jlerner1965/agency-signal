@@ -21,7 +21,8 @@ import { stdin, stdout } from "node:process";
 const run = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
 const wrangler = resolve(root, "node_modules/wrangler/bin/wrangler.js");
-const devVars = resolve(root, ".dev.vars");
+// Same override the credentials script honours; child processes inherit it.
+const devVars = process.env.AGENCYSIGNAL_DEV_VARS || resolve(root, ".dev.vars");
 
 const argv = process.argv.slice(2);
 const flags = new Set(argv.filter((value) => value.startsWith("--")));
@@ -67,8 +68,12 @@ function parseJson(output) {
   throw new Error("no JSON in wrangler output");
 }
 
+// Named rather than inlined, so adding a step cannot leave the counter reading
+// "[7/6]" the way a literal total does.
+const TOTAL_STEPS = 7;
+
 function step(number, text) {
-  console.log(`\n[${number}/6] ${text}`);
+  console.log(`\n[${number}/${TOTAL_STEPS}] ${text}`);
 }
 
 // ---------------------------------------------------------------- 1. account
@@ -174,9 +179,46 @@ if (complete) {
   console.log("      generated a login and wrote it to .dev.vars");
 }
 
-// ----------------------------------------------------------------- 6. deploy
+// -------------------------------------------------------------- 6. audit keys
 
-step(6, "Deploying, with the secrets");
+step(6, "Audit API keys");
+
+// These ride along in the same --secrets-file as the login, so the moment to
+// ask for them is before the deploy — not in a hint printed after it. Printing
+// the hint instead is how a deployed run ends up rate-limited on the unkeyed
+// PageSpeed quota and reports a dozen checks as not measured.
+const AUDIT_KEYS = [
+  { name: "PAGESPEED_API_KEY", flag: "pagespeed-key", ask: "      PageSpeed key (free, no billing; blank to skip): " },
+  { name: "GOOGLE_PLACES_API_KEY", flag: "places-key", ask: "      Google Places key (billed per request; blank to skip): " },
+];
+
+const afterLogin = await readFile(devVars, "utf8").catch(() => "");
+const keyIsSet = (name) => new RegExp(`^${name}=.+`, "m").test(afterLogin);
+const supplied = {};
+for (const key of AUDIT_KEYS) {
+  const provided = flagValue(key.flag).trim();
+  if (provided) { supplied[key.flag] = provided; continue; }
+  if (keyIsSet(key.name)) { console.log(`      ${key.name} already in .dev.vars`); continue; }
+  if (!stdin.isTTY) continue;
+  const rl = createInterface({ input: stdin, output: stdout });
+  const entered = (await rl.question(key.ask)).trim();
+  rl.close();
+  if (entered) supplied[key.flag] = entered;
+}
+
+if (Object.keys(supplied).length) {
+  // Key flags alone, so scripts/setup-credentials.mjs leaves the login be.
+  await run(process.execPath, [resolve(root, "scripts/setup-credentials.mjs"),
+    ...Object.entries(supplied).flatMap(([flag, value]) => [`--${flag}`, value])], { cwd: root });
+  console.log("      written to .dev.vars — they upload with the deploy below");
+}
+
+const stillMissing = AUDIT_KEYS.filter((key) => !supplied[key.flag] && !keyIsSet(key.name));
+for (const key of stillMissing) console.log(`      ${key.name} not set — the checks it feeds will report as not measured`);
+
+// ----------------------------------------------------------------- 7. deploy
+
+step(7, "Deploying, with the secrets");
 const deploy = await run(process.execPath, [resolve(root, "scripts/deploy-cloudflare.mjs"),
   `--secrets-file=${devVars}`], { cwd: root, env: process.env, maxBuffer: 32 * 1024 * 1024 })
   .catch((error) => {
@@ -194,6 +236,9 @@ if (generatedPassword) {
   console.log(`\n  Password: ${generatedPassword}`);
   console.log("  Shown once. It is not stored anywhere — only its hash is.");
 }
-console.log("\nThe audit keys are optional and can go in whenever you have them:");
-console.log(`  npx wrangler secret put PAGESPEED_API_KEY     --name ${workerName}`);
-console.log(`  npx wrangler secret put GOOGLE_PLACES_API_KEY --name ${workerName}`);
+if (stillMissing.length) {
+  console.log("\nThe audit keys still missing, whenever you have them:");
+  for (const key of stillMissing) console.log(`  npx wrangler secret put ${key.name} --name ${workerName}`);
+} else {
+  console.log("\nBoth audit keys were uploaded with the deploy.");
+}

@@ -29,6 +29,7 @@ export async function collectServiceLines(context: CollectContext, keys: Record<
       requestKey: cKey,
       ok: Boolean(home?.ok),
       retryable: Boolean(!home?.ok && crawl.homeRetryable),
+      throttled: home?.status === 429,
       failureReason: home?.ok ? "" : home?.reason ?? "The website could not be reached.",
       payload: {
         // Distilled, not raw: D1 caps a row at 2 MB.
@@ -59,6 +60,7 @@ export async function collectServiceLines(context: CollectContext, keys: Record<
       requestKey: pKey,
       ok: places.ok,
       retryable: places.retryable,
+      throttled: places.throttled,
       failureReason: places.reason,
       payload: places.payload,
     });

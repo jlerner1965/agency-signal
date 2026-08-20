@@ -189,3 +189,87 @@ test("entered manual values feed the same checks as API data", () => {
   assert.equal(photos.status, "passed");
   assert.equal(result.manualChecks.length, 0);
 });
+
+// A supplier files what it sells under /industries or /products, not /services.
+// Matching only the clinic vocabulary is why one of these came back as the
+// whole product range.
+const SUPPLIER_PAGES = [
+  page("/", { title: "AragoCor Minerals", h1: ["Oolitic Aragonite Sized to Your Process"] }),
+  page("/industries", { title: "Industries", h1: ["Industries we supply"], h2: ["Glass", "Agriculture", "Polymers"] }),
+  page("/industries/water-treatment", { title: "Water Treatment", h1: ["Aragonite for Water Treatment."] }),
+  page("/industries/glass", { title: "Glass", h1: ["Aragonite for Glass"] }),
+  page("/products/oolitic-aragonite", { title: "Oolitic Aragonite", h1: ["Oolitic Aragonite"] }),
+  page("/about", { title: "About", h1: ["About"] }),
+];
+const SUPPLIER_NAV = [
+  { url: "https://clinic.test/industries/water-treatment", text: "Water Treatment" },
+  { url: "https://clinic.test/industries/glass", text: "Glass" },
+  { url: "https://clinic.test/about", text: "About" },
+];
+
+test("what a supplier sells is read from /industries and /products", () => {
+  const names = extractSiteServices(SUPPLIER_PAGES, SUPPLIER_NAV).map((service) => service.name);
+  assert.ok(names.includes("Aragonite for Glass"), "an industry page is a line the site sells");
+  assert.ok(names.includes("Oolitic Aragonite"), "so is a product page");
+  // The H2s of whichever index the site publishes are sub-lines of it.
+  assert.ok(names.includes("Agriculture"), "index headings count on an /industries page too");
+  assert.ok(!names.includes("About"));
+});
+
+test("a heading's punctuation is not part of the service name", () => {
+  // "Aragonite for Water Treatment." reached the gap table, every mockup
+  // heading, and the middle of proposal sentences with the full stop attached.
+  const names = extractSiteServices(SUPPLIER_PAGES, SUPPLIER_NAV).map((service) => service.name);
+  assert.ok(names.includes("Aragonite for Water Treatment"));
+  assert.ok(!names.some((name) => /[.,;:!]$/.test(name)), `a name still ends in punctuation: ${names.join(", ")}`);
+});
+
+test("an industries index is not a landing page for the lines it lists", () => {
+  const result = analyzeServiceLines([
+    { source: "crawl", ok: true, payload: { pages: SUPPLIER_PAGES, navigation: SUPPLIER_NAV, manual: {} } },
+    { source: "places", ok: false, failureReason: "no key", payload: null },
+  ]);
+  const agriculture = result.serviceLines.find((line) => line.name === "Agriculture");
+  assert.ok(agriculture, "the line was identified");
+  assert.equal(agriculture.hasLandingPage, false, "listed on the index, but it has no page of its own");
+
+  const glass = result.serviceLines.find((line) => line.name === "Aragonite for Glass");
+  assert.equal(glass.hasLandingPage, true, "this one does have its own page");
+});
+
+test("a line listed on an index and given its own page is one line, not two", () => {
+  // The index names it "Glass" and the page calls itself "Aragonite for Glass".
+  // Whichever the crawl reaches first, that is one thing the business sells.
+  const pages = [
+    page("/", { h1: ["Home"] }),
+    page("/industries", { h1: ["Industries we supply"], h2: ["Glass", "Agriculture"] }),
+    page("/industries/glass", { h1: ["Aragonite for Glass"] }),
+  ];
+  const names = extractSiteServices(pages, []).map((service) => service.name);
+  assert.deepEqual(names.sort(), ["Agriculture", "Aragonite for Glass"]);
+
+  // And in the other crawl order.
+  const reversed = [pages[0], pages[2], pages[1]];
+  assert.deepEqual(extractSiteServices(reversed, []).map((service) => service.name).sort(), ["Agriculture", "Aragonite for Glass"]);
+});
+
+test("an index page's own heading is not a thing the business sells", () => {
+  const pages = [
+    page("/", { h1: ["Home"] }),
+    page("/services", { h1: ["Our Services"], h2: ["Roof Repair", "Gutter Cleaning"] }),
+  ];
+  const names = extractSiteServices(pages, []).map((service) => service.name);
+  assert.deepEqual(names.sort(), ["Gutter Cleaning", "Roof Repair"]);
+  assert.ok(!names.includes("Our Services"));
+});
+
+test("an index's own label is navigation chrome, not a line", () => {
+  const nav = [
+    { url: "https://clinic.test/industries", text: "Industries" },
+    { url: "https://clinic.test/products", text: "Products" },
+    { url: "https://clinic.test/industries/glass", text: "Glass" },
+  ];
+  const pages = [page("/", { h1: ["Home"] }), page("/industries/glass", { h1: ["Aragonite for Glass"] })];
+  const names = extractSiteServices(pages, nav).map((service) => service.name);
+  assert.deepEqual(names, ["Aragonite for Glass"]);
+});

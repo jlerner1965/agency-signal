@@ -59,6 +59,10 @@ export type StoredPayload = {
   ok: boolean;
   /** A throttle or transport error worth another attempt, not a verdict. */
   retryable?: boolean;
+  /** The source rate-limited us. Waits for a quota window, not for a blip. */
+  throttled?: boolean;
+  /** Seconds the source itself asked us to wait, when it said so. */
+  retryAfterSeconds?: number;
   failureReason?: string;
   payload: unknown;
 };
@@ -287,13 +291,19 @@ async function runModule(runId: number, moduleId: string, context: CollectContex
   const retryable = collected.payloads.filter((payload) => !payload.ok && payload.retryable);
   if (retryable.length && attempts < maxAttempts) {
     const reason = retryable[0].failureReason ?? "A source failed transiently.";
+    // A rate limit waits for the quota window to reopen; retrying inside it
+    // spends an attempt without ever being let back in. Where a source named
+    // its own wait, that wins over any curve.
+    const throttled = retryable.some((payload) => payload.throttled);
+    const retryAfterSeconds = Math.max(0, ...retryable.map((payload) => payload.retryAfterSeconds ?? 0));
+    const wait = backoffSeconds(attempts, { throttled, retryAfterSeconds });
     return {
       status: "Retrying",
-      message: `Attempt ${attempts} of ${maxAttempts} deferred: ${reason}`,
+      message: `Attempt ${attempts} of ${maxAttempts} deferred, waiting ${wait}s: ${reason}`,
       findings: [], checks: [],
       costCents: collected.costCents,
       payloadIds: ids,
-      retryInSeconds: backoffSeconds(attempts),
+      retryInSeconds: wait,
       retryReason: reason,
     };
   }

@@ -2,13 +2,34 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { backoffSeconds, retryPolicy, unverifiedReasons, confidenceOf, scopedChecks, minimumConfidence } from "../lib/audit/scoring-config.js";
 
-test("backoff grows exponentially and is capped", () => {
-  assert.deepEqual([1, 2, 3, 4].map(backoffSeconds), [4, 8, 16, 32]);
+test("a transient failure backs off in seconds", () => {
+  assert.deepEqual([1, 2, 3, 4].map((attempt) => backoffSeconds(attempt)), [4, 8, 16, 32]);
   assert.equal(backoffSeconds(10), retryPolicy.maxDelaySeconds);
-  // Four attempts spread over roughly a minute, which clears a PageSpeed
-  // 100-second rate window without hammering it.
-  const total = [1, 2, 3].reduce((sum, attempt) => sum + backoffSeconds(attempt), 0);
-  assert.ok(total >= 28 && total <= 120, `unexpected total backoff ${total}s`);
+});
+
+test("a throttle waits for the quota window, not for a blip", () => {
+  // The old curve spent all three deferrals inside 28 seconds, which is shorter
+  // than the window it was waiting on — so every attempt hit the same closed
+  // window and the run reported the checks as not measured. The attempts have
+  // to land in different windows to be worth spending.
+  const throttled = [1, 2, 3].map((attempt) => backoffSeconds(attempt, { throttled: true }));
+  assert.deepEqual(throttled, [30, 60, 120]);
+
+  const total = throttled.reduce((sum, wait) => sum + wait, 0);
+  assert.ok(total >= 120, `three throttled deferrals only span ${total}s`);
+  assert.ok(throttled.every((wait, index) => wait > backoffSeconds(index + 1)), "a throttle must wait longer than a blip");
+  assert.equal(backoffSeconds(99, { throttled: true }), retryPolicy.throttleMaxDelaySeconds);
+});
+
+test("a source that names its own wait is believed over the curve", () => {
+  assert.equal(backoffSeconds(1, { throttled: true, retryAfterSeconds: 45 }), 45);
+  // Even on the first attempt, where the curve would have said 4.
+  assert.equal(backoffSeconds(1, { retryAfterSeconds: 12 }), 12);
+  // But never beyond the cap, so a hostile header cannot stall a run.
+  assert.equal(backoffSeconds(1, { throttled: true, retryAfterSeconds: 86_400 }), retryPolicy.throttleMaxDelaySeconds);
+  assert.equal(backoffSeconds(1, { retryAfterSeconds: 86_400 }), retryPolicy.maxDelaySeconds);
+  // A missing or unparseable header falls back rather than waiting zero.
+  assert.equal(backoffSeconds(2, { throttled: true, retryAfterSeconds: 0 }), 60);
 });
 
 test("the three unmeasured outcomes are distinct values", () => {

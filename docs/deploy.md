@@ -60,9 +60,20 @@ will not silently rotate your password and sign you out.
 --name=my-worker          Worker and database name, default agency-signal
 --r2=my-bucket            attach an R2 bucket; omitted entirely by default
 --skip-build              reuse the existing dist/ instead of rebuilding
+--pagespeed-key=KEY       audit key, stored and uploaded with the deploy
+--places-key=KEY          audit key, stored and uploaded with the deploy
 ```
 
-The audit keys are not part of it, because a deploy without them still works:
+It asks for the two audit keys before deploying, so they upload with the same
+secrets file as the login. Both are optional — leave either blank and the deploy
+proceeds, saying which checks will report as not measured. A key already in
+`.dev.vars` is reused without asking. Pass them directly to skip the prompts:
+
+```bash
+npm run setup:cloudflare -- --pagespeed-key=KEY --places-key=KEY
+```
+
+Adding one after the fact takes a redeploy or a secret put:
 
 ```bash
 npx wrangler secret put PAGESPEED_API_KEY     --name agency-signal

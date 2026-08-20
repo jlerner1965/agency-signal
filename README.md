@@ -46,6 +46,13 @@ times a counted quantity, then a sum.
   pass, so nothing is omitted.
 - **Crawl diagnostics** — final status, robots.txt fetchability, pages reached
   against pages attempted, and any blocking responses with their server headers.
+- **Concept mockups** in the prospect's own colours, type and logo. The words
+  come from a register chosen from evidence the audit already holds — the Google
+  category first, then the site's own structured data and copy — because a
+  supplier shown a page about practitioners and appointments reads as a template
+  with the name swapped in. Where the evidence is thin or contradictory the
+  neutral register is used, and the register and its reason are stored with the
+  mockup. See `lib/audit/register.js`.
 
 ## Required credentials
 
@@ -129,7 +136,13 @@ npm run setup -- --email you@example.com --password 'a long passphrase' \
 
 It writes `.dev.vars`, which is git-ignored and read by the local Worker, and
 prints the same values for the hosted runtime. The password itself is never
-stored. Re-run `npm run auth:credentials` to rotate the login or add a key later.
+stored. Re-run `npm run auth:credentials` to rotate the login, or pass a key flag
+on its own to add a key without touching the login:
+
+```bash
+npm run auth:credentials -- --pagespeed-key KEY   # login and sessions untouched
+npm run auth:credentials                          # rotates the login
+```
 
 ### API keys
 
