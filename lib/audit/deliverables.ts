@@ -4,7 +4,7 @@ import { auditRunModules, auditRuns, findings as findingsTable, leads, mockups, 
 import { assertEvidence, buildRecommendations, groundRationale } from "@/lib/audit/recommendations";
 import { buildVoicePrompt, composeOpening, hasSendableHook, planFromFindings, selectOpeningFindings, validateVoice } from "@/lib/audit/proposal-voice";
 import { extractBrandTokens } from "@/lib/audit/brand";
-import { buildHomepageMockup, buildServicePageMockup } from "@/lib/audit/mockup";
+import { buildHomepageMockup, buildServicePageMockup, readMockupContent } from "@/lib/audit/mockup";
 import { detectRegister } from "@/lib/audit/register";
 import { runtimeValue } from "@/lib/runtime-env";
 import pricingConfig from "@/config/pricing.json";
@@ -357,11 +357,17 @@ export async function buildRunMockups(runId: number) {
     siteText: crawledPages.map((page) => [page.text, ...(page.h1 ?? []), ...(page.h2 ?? [])].filter(Boolean).join(" ")).join(" "),
   });
 
+  // The prospect's own sentences, matched to the lines they belong to. A
+  // concept page built from these shows their business rearranged; one built
+  // from placeholder prose only shows a layout.
+  const content = readMockupContent(crawledPages, serviceLines);
+  const options = { register: register.register, content };
+
   await db.delete(mockups).where(eq(mockups.runId, runId));
 
   const built = [
-    { kind: "homepage", title: "Homepage concept", html: buildHomepageMockup(brand, serviceLines, register.register) },
-    { kind: "service-page", title: `${serviceLines[0]?.name ?? "Service"} page concept`, html: buildServicePageMockup(brand, serviceLines, register.register) },
+    { kind: "homepage", title: "Homepage concept", html: buildHomepageMockup(brand, serviceLines, options) },
+    { kind: "service-page", title: `${serviceLines[0]?.name ?? "Service"} page concept`, html: buildServicePageMockup(brand, serviceLines, options) },
   ];
 
   await db.insert(mockups).values(built.map((mockup) => ({

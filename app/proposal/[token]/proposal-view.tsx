@@ -2,8 +2,39 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
+/** One priced line, traced back to the findings that justify it. */
+type ScopeItem = {
+  deliverable: string; label: string; criteria: string; rationale: string;
+  quantity: number; display: string;
+};
+
+type Retainer = { label: string; criteria: string; display: string };
+
+type MockupLink = { kind: string; title: string; url: string };
+
+/**
+ * Everything the proposal API returns. Two builders write this row — the
+ * lead-based one and the audit-run one — and the run-based fields are simply
+ * absent on older proposals. They are typed as possibly-empty here rather than
+ * cast in at each point of use, which is what the casts were hiding.
+ */
+type ProposalRecord = {
+  title: string; service: string; outcome: string; scope: string;
+  deliverables: string[]; price: number; timeline: string; status: string;
+  expiresAt: string; acceptedAt: string | null;
+  scopeItems: ScopeItem[];
+  mockupLinks: MockupLink[];
+  retainer: Retainer | null;
+  priceDisplay: string;
+  openingProse: string;
+  openingBlocked: string;
+  minimumApplied: boolean;
+  pricingPlaceholder: boolean;
+  voicePlaceholder: boolean;
+};
+
 type Payload = {
-  proposal: { title: string; service: string; outcome: string; scope: string; deliverables: string[]; price: number; timeline: string; status: string; expiresAt: string; acceptedAt: string | null };
+  proposal: ProposalRecord;
   lead: { agencyName: string; contactName: string; city: string; state: string };
   audit: { score: number; pagesAudited: number; confidenceScore: number; checksPassed: number; checksFailed: number; createdAt: string } | null;
   googleAudit: { score: number; reviewedAt: string | null } | null;
@@ -43,84 +74,72 @@ export default function ProposalView({ token, ownerName }: { token: string; owne
   if (!payload) return <main className="proposal-state"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><section><span className="report-loader" /><p>Loading proposal…</p></section></main>;
 
   const { proposal, lead, audit, googleAudit, findings, competitors } = payload;
+
+  // The config decides how a figure is framed — "starts at $4,500" is not the
+  // same claim as "$4,500". Printing the raw band minimum in the hero stated a
+  // firm price the pricing file had deliberately called a starting one.
+  const investment = proposal.priceDisplay || `$${proposal.price.toLocaleString("en-US")}`;
+
+  const blocked = [
+    proposal.pricingPlaceholder ? "The amounts below come from placeholder pricing." : "",
+    proposal.voicePlaceholder ? "No opening has been written — config/voice.md is still a placeholder." : "",
+    proposal.openingBlocked || "",
+  ].filter(Boolean);
+
   return <main className="proposal-shell">
     <header className="proposal-nav"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><div className="proposal-nav-actions"><span>Prepared for {lead.agencyName}</span><button onClick={copyLink}>{copied ? "Copied" : "Copy link"}</button><button className="primary" onClick={() => window.print()}>Print / Save PDF</button></div></header>
-    <section className="proposal-hero"><div className="proposal-container"><p className="eyebrow">Digital growth proposal</p><h1>{proposal.title}</h1><p>{proposal.outcome}</p><div className="proposal-summary"><span>Investment<strong>${proposal.price.toLocaleString("en-US")}</strong></span><span>Timeline<strong>{proposal.timeline}</strong></span><span>Valid until<strong>{new Date(proposal.expiresAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong></span></div></div></section>
-{(() => {
-      const draft = proposal as unknown as { voicePlaceholder?: boolean; pricingPlaceholder?: boolean; openingProse?: string; openingBlocked?: string };
-      const blocked = [
-        draft.pricingPlaceholder ? "The amounts below come from placeholder pricing." : "",
-        draft.voicePlaceholder ? "No opening has been written — config/voice.md is still a placeholder." : "",
-        draft.openingBlocked || "",
-      ].filter(Boolean);
-      return (
-        <>
-          {blocked.length > 0 && (
-            <div className="proposal-stub" role="status">
-              <strong>Draft — not ready to send.</strong>
-              {blocked.map((reason) => <span key={reason}>{reason}</span>)}
-            </div>
-          )}
-          {(() => {
-            const scope = (draft as unknown as { scopeItems?: Array<Record<string, string | number>> }).scopeItems ?? [];
-            const retainer = (draft as unknown as { retainer?: string }).retainer;
-            const parsedRetainer = retainer ? JSON.parse(retainer) as { label: string; criteria: string; display: string } : null;
-            if (!scope.length) return null;
-            return (
-              <section className="proposal-container proposal-pricing">
-                <p className="eyebrow">Scope and investment</p>
-                <ul>
-                  {scope.map((item) => (
-                    <li key={String(item.deliverable)}>
-                      <div>
-                        <strong>{item.label}{Number(item.quantity) > 1 ? ` × ${item.quantity}` : ""}</strong>
-                        <small>{item.criteria}</small>
-                        <em>{item.rationale}</em>
-                      </div>
-                      <b>{item.display}</b>
-                    </li>
-                  ))}
-                </ul>
-                <div className="proposal-total">
-                  <span>Total</span>
-                  <b>{(draft as unknown as { priceDisplay?: string }).priceDisplay}</b>
-                  {(draft as unknown as { minimumApplied?: boolean }).minimumApplied && (
-                    <small>The minimum engagement applies.</small>
-                  )}
-                </div>
-                {(() => {
-                  const links = JSON.parse((draft as unknown as { mockupLinks?: string }).mockupLinks || "[]") as Array<{ title: string; url: string }>;
-                  if (!links.length) return null;
-                  return (
-                    <div className="proposal-visuals">
-                      <p className="eyebrow">Concept pages</p>
-                      {links.map((link) => (
-                        <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.title} ↗</a>
-                      ))}
-                    </div>
-                  );
-                })()}
-                {parsedRetainer && (
-                  <div className="proposal-retainer">
-                    <div><strong>{parsedRetainer.label}</strong><small>{parsedRetainer.criteria}</small></div>
-                    <b>{parsedRetainer.display}</b>
-                  </div>
-                )}
-              </section>
-            );
-          })()}
-          {draft.openingProse ? (
-            <section className="proposal-container proposal-opening">
-              {draft.openingProse.split(/\n{2,}/).map((paragraph, index) => (
-                <p key={index}>{paragraph.split("\n").map((line, lineIndex) => (
-                  <span key={lineIndex}>{line}<br /></span>
-                ))}</p>
-              ))}
-            </section>
-          ) : null}
-        </>
-      );
-    })()}
+    <section className="proposal-hero"><div className="proposal-container"><p className="eyebrow">Digital growth proposal</p><h1>{proposal.title}</h1><p>{proposal.outcome}</p><div className="proposal-summary"><span>Investment<strong>{investment}</strong></span>{proposal.timeline ? <span>Timeline<strong>{proposal.timeline}</strong></span> : null}<span>Valid until<strong>{new Date(proposal.expiresAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong></span></div></div></section>
+{blocked.length > 0 && (
+      <div className="proposal-stub" role="status">
+        <strong>Draft — not ready to send.</strong>
+        {blocked.map((reason) => <span key={reason}>{reason}</span>)}
+      </div>
+    )}
+    {proposal.scopeItems.length > 0 && (
+      <section className="proposal-container proposal-pricing">
+        <p className="eyebrow">Scope and investment</p>
+        <ul>
+          {proposal.scopeItems.map((item) => (
+            <li key={item.deliverable}>
+              <div>
+                <strong>{item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ""}</strong>
+                <small>{item.criteria}</small>
+                <em>{item.rationale}</em>
+              </div>
+              <b>{item.display}</b>
+            </li>
+          ))}
+        </ul>
+        <div className="proposal-total">
+          <span>Total</span>
+          <b>{investment}</b>
+          {proposal.minimumApplied && <small>The minimum engagement applies.</small>}
+        </div>
+        {proposal.mockupLinks.length > 0 && (
+          <div className="proposal-visuals">
+            <p className="eyebrow">Concept pages</p>
+            {proposal.mockupLinks.map((link) => (
+              <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.title} ↗</a>
+            ))}
+          </div>
+        )}
+        {proposal.retainer && (
+          <div className="proposal-retainer">
+            <div><strong>{proposal.retainer.label}</strong><small>{proposal.retainer.criteria}</small></div>
+            <b>{proposal.retainer.display}</b>
+          </div>
+        )}
+      </section>
+    )}
+    {proposal.openingProse ? (
+      <section className="proposal-container proposal-opening">
+        {proposal.openingProse.split(/\n{2,}/).map((paragraph, index) => (
+          <p key={index}>{paragraph.split("\n").map((line, lineIndex) => (
+            <span key={lineIndex}>{line}<br /></span>
+          ))}</p>
+        ))}
+      </section>
+    ) : null}
     <section className="proposal-container proposal-body"><div><p className="eyebrow">Why this work</p><h2>A focused response to an identified opportunity.</h2><p>{proposal.scope}</p><p>This scope is designed to improve a measurable customer-acquisition outcome without adding work that is not tied to the stated objective.</p></div><aside><span>Recommended service</span><strong>{proposal.service}</strong><small>Prepared by {ownerName}</small></aside></section>
     {findings.length > 0 && <section className="proposal-evidence"><div className="proposal-container"><div className="proposal-evidence-head"><div><p className="eyebrow">Audit evidence</p><h2>What the digital presence review found</h2>{audit && <p>{audit.checksPassed} checks passed · {audit.checksFailed} need work · {audit.confidenceScore}/100 evidence confidence</p>}</div><div className="proposal-score-pair">{audit && <div className="proposal-audit-score"><strong>{audit.score}</strong><span>website score<br />{audit.pagesAudited} page{audit.pagesAudited === 1 ? "" : "s"} reviewed</span></div>}{googleAudit && <div className="proposal-audit-score"><strong>{googleAudit.score}</strong><span>Google presence<br />profile scorecard</span></div>}</div></div>{competitors.length > 0 && <div className="proposal-benchmarks"><span>Competitive website benchmark</span>{competitors.map((item) => <article key={item.id}><strong>{item.name}</strong><b>{item.score}/100</b></article>)}</div>}<div className="proposal-evidence-grid">{findings.map((finding, index) => <article key={`${finding.title}-${index}`}><span>{finding.category} · {finding.severity}</span><h3>{finding.title}</h3><p>{finding.evidence}</p><strong>Recommended</strong><p>{finding.recommendation}</p></article>)}</div></div></section>}
     <section className="proposal-deliverables"><div className="proposal-container"><p className="eyebrow">Included</p><h2>Deliverables and implementation</h2><ol>{proposal.deliverables.map((item, index) => <li key={item}><span>0{index + 1}</span><strong>{item}</strong></li>)}</ol></div></section>
