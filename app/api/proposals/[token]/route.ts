@@ -1,7 +1,15 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, auditFindings, audits, competitorAudits, leads, proposals } from "@/db/schema";
+import { activities, auditFindings, audits, competitorAudits, findings as engineFindings, leads, proposals } from "@/db/schema";
+import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
+import { serviceLinesFor } from "@/lib/audit/deliverables";
+
+/** Stored JSON columns are parsed once here so no reader has to guess a shape. */
+function parseJson<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback;
+  try { return JSON.parse(value) as T; } catch { return fallback; }
+}
 
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
   try {
@@ -12,23 +20,56 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     const [lead] = await db.select().from(leads).where(eq(leads.id, proposal.leadId)).limit(1);
     if (!lead) return Response.json({ error: "Proposal unavailable" }, { status: 404 });
     const [audit] = await db.select().from(audits).where(eq(audits.leadId, lead.id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
-    const websiteFindings = audit ? await db.select({ title: auditFindings.title, evidence: auditFindings.evidence, recommendation: auditFindings.recommendation, category: auditFindings.category, severity: auditFindings.severity }).from(auditFindings).where(eq(auditFindings.auditId, audit.id)).orderBy(auditFindings.sortOrder).limit(3) : [];
     const googleAudit = buildGooglePresenceAudit(lead);
     const competitors = await db.select({ id: competitorAudits.id, name: competitorAudits.name, score: competitorAudits.score }).from(competitorAudits).where(eq(competitorAudits.leadId, lead.id)).orderBy(desc(competitorAudits.score)).limit(3);
-    const findings = [...websiteFindings.slice(0, 2), ...googleAudit.findings.slice(0, 2)].slice(0, 4);
+
+    // A proposal built from an audit run cites that run's findings. Reading the
+    // legacy audit instead showed a run-based proposal either nothing or a
+    // different pass's evidence, which is the one thing this document cannot do.
+    const findings = proposal.runId
+      ? await db
+        .select({ id: engineFindings.id, title: engineFindings.title, evidence: engineFindings.evidence, recommendation: engineFindings.recommendation, category: engineFindings.category, severity: engineFindings.severity, affectedUrl: engineFindings.affectedUrl })
+        .from(engineFindings)
+        .where(eq(engineFindings.runId, proposal.runId))
+        .orderBy(engineFindings.sortOrder)
+      : [
+        ...(audit ? await db.select({ title: auditFindings.title, evidence: auditFindings.evidence, recommendation: auditFindings.recommendation, category: auditFindings.category, severity: auditFindings.severity }).from(auditFindings).where(eq(auditFindings.auditId, audit.id)).orderBy(auditFindings.sortOrder).limit(2) : []),
+        ...googleAudit.findings.slice(0, 2),
+      ].slice(0, 4);
     await db.batch([
       db.update(proposals).set({ viewCount: sql`${proposals.viewCount} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(proposals.id, proposal.id)),
       db.update(leads).set({ status: proposal.status === "Accepted" ? "Won" : "Decision pending", updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(leads.id, lead.id)),
       db.insert(activities).values({ leadId: lead.id, activityType: "proposal_viewed", description: `${proposal.title} proposal viewed` }),
     ]);
     return Response.json({
-      // Spread first, then the derived fields, or the raw row overwrites them.
+      // Named field by field rather than spread. This endpoint is public to
+      // anyone holding the link, and the row also carries who signed it, their
+      // email, and the internal ids — none of which the document needs.
       proposal: {
-        ...proposal,
-        viewCount: proposal.viewCount + 1,
-        deliverables: JSON.parse(proposal.deliverables || "[]"),
-        scopeItems: JSON.parse(proposal.scopeItems || "[]"),
+        title: proposal.title,
+        service: proposal.service,
+        outcome: proposal.outcome,
+        scope: proposal.scope,
+        price: proposal.price,
+        priceDisplay: proposal.priceDisplay,
+        timeline: proposal.timeline,
+        status: proposal.status,
+        expiresAt: proposal.expiresAt,
+        acceptedAt: proposal.acceptedAt,
+        openingProse: proposal.openingProse,
+        openingBlocked: proposal.openingBlocked,
+        minimumApplied: proposal.minimumApplied,
+        pricingPlaceholder: proposal.pricingPlaceholder,
+        voicePlaceholder: proposal.voicePlaceholder,
+        deliverables: parseJson<string[]>(proposal.deliverables, []),
+        scopeItems: parseJson<unknown[]>(proposal.scopeItems, []),
+        mockupLinks: parseJson<unknown[]>(proposal.mockupLinks, []),
+        retainer: parseJson<unknown>(proposal.retainer, null),
       },
+      // The gap between what the site sells and what Google carries is the
+      // argument this document is making, so it belongs in the document rather
+      // than in a separate report the reader has to be sent to.
+      serviceLines: proposal.runId ? await serviceLinesFor(proposal.runId) : [],
       lead: { agencyName: lead.agencyName, contactName: lead.contactName, city: lead.city, state: lead.state },
       audit: audit && audit.confidenceScore > 0 ? { score: audit.score, pagesAudited: audit.pagesAudited, confidenceScore: audit.confidenceScore, checksPassed: audit.checksPassed, checksFailed: audit.checksFailed, createdAt: audit.createdAt } : null,
       googleAudit: googleAudit.reviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,
@@ -60,5 +101,54 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     return Response.json({ ok: true, status: "Accepted" });
   } catch {
     return Response.json({ error: "Unable to accept proposal" }, { status: 500 });
+  }
+}
+
+/**
+ * Edit the parts of a proposal a person writes.
+ *
+ * The split is the point. Prose, the timeline and the title are judgment and
+ * belong to whoever is selling; the evidence, its quotes, the URLs it cites and
+ * every per-unit figure come from the audit and the pricing file, and are not
+ * editable here at any price. A document that lets you retype the evidence is
+ * no longer evidence.
+ */
+const EDITABLE = ["openingProse", "timeline", "title"] as const;
+
+export async function PATCH(request: Request, context: { params: Promise<{ token: string }> }) {
+  const denied = await requireDashboardApi();
+  if (denied) return denied;
+  try {
+    const { token } = await context.params;
+    const body = (await request.json()) as Partial<Record<(typeof EDITABLE)[number], unknown>>;
+
+    const patch: Record<string, string> = {};
+    if (typeof body.openingProse === "string") patch.openingProse = body.openingProse.slice(0, 4_000);
+    if (typeof body.timeline === "string") patch.timeline = body.timeline.replace(/\s+/g, " ").trim().slice(0, 100);
+    if (typeof body.title === "string") {
+      const title = body.title.replace(/\s+/g, " ").trim().slice(0, 160);
+      // The title heads the document, so an empty one is a mistake, not a clear.
+      if (!title) return Response.json({ error: "A proposal needs a title." }, { status: 400 });
+      patch.title = title;
+    }
+    if (!Object.keys(patch).length) {
+      return Response.json({ error: `Nothing to change. Editable fields: ${EDITABLE.join(", ")}.` }, { status: 400 });
+    }
+
+    const db = await getDb();
+    const [proposal] = await db.select().from(proposals).where(eq(proposals.token, token)).limit(1);
+    if (!proposal) return Response.json({ error: "Proposal not found" }, { status: 404 });
+    // An accepted proposal is a record of what was agreed, not a draft.
+    if (proposal.status === "Accepted") {
+      return Response.json({ error: "This proposal has been accepted and can no longer be edited." }, { status: 409 });
+    }
+
+    const [updated] = await db.update(proposals)
+      .set({ ...patch, updatedAt: sql`CURRENT_TIMESTAMP` })
+      .where(eq(proposals.id, proposal.id))
+      .returning();
+    return Response.json({ proposal: { token: updated.token, title: updated.title, timeline: updated.timeline, openingProse: updated.openingProse } });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Unable to update the proposal." }, { status: 500 });
   }
 }

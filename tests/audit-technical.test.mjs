@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { analyzeTechnical } from "../lib/audit/analyze-technical.js";
+import { analyzeTechnical, canonicalRedirect } from "../lib/audit/analyze-technical.js";
 import { scoreChecks, orderFindings, priorityOf, confidenceOf, minimumConfidence } from "../lib/audit/scoring-config.js";
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -188,4 +188,45 @@ test("confidence weights match the weights the score uses", () => {
   ];
   assert.equal(confidenceOf(checks), 50);
   assert.equal(scoreChecks(checks), 100);
+});
+
+
+// A redirect is something the audit measured, so the check has an answer either
+// way. Reporting it as unverified claimed both "the homepage redirects" and "we
+// could not tell" in one line, and cost coverage on a correctly-configured site.
+
+test("enforcing www or https is configuration, not a finding", () => {
+  assert.ok(canonicalRedirect("https://x.test/", "https://www.x.test/"));
+  assert.ok(canonicalRedirect("https://www.x.test/", "https://x.test/"));
+  assert.ok(canonicalRedirect("https://x.test/", "https://x.test"));
+  // Nothing to compare against asserts no defect.
+  assert.ok(canonicalRedirect("", "https://x.test/"));
+});
+
+test("a redirect that lands somewhere else is a different claim", () => {
+  assert.ok(!canonicalRedirect("https://x.test/", "https://x.test/home"));
+  assert.ok(!canonicalRedirect("https://x.test/", "https://elsewhere.test/"));
+});
+
+test("the homepage redirect check is measured rather than left unverified", () => {
+  const redirectCheck = (payload) => {
+    const result = analyzeTechnical([documentPayload(HTML_GOOD, payload)]);
+    return result.checks.find((check) => check.id === "redirects");
+  };
+
+  const direct = redirectCheck({ redirected: false });
+  assert.equal(direct.status, "passed");
+
+  const canonical = redirectCheck({
+    redirected: true, requestedUrl: "https://clinic.test/", finalUrl: "https://www.clinic.test/",
+  });
+  assert.equal(canonical.status, "passed", "a canonical redirect is not a defect");
+  assert.match(canonical.evidence, /canonical/);
+
+  const moved = redirectCheck({
+    redirected: true, requestedUrl: "https://clinic.test/", finalUrl: "https://clinic.test/home",
+  });
+  assert.equal(moved.status, "failed");
+  // Never unverified: the audit knows the answer in all three cases.
+  for (const check of [direct, canonical, moved]) assert.notEqual(check.status, "unverified");
 });

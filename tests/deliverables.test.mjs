@@ -7,6 +7,7 @@ import { buildRecommendations, validateEvidence, assertEvidence, groundRationale
 import { extractBrandTokens, extractPalette } from "../lib/audit/brand.js";
 import { buildHomepageMockup, buildServicePageMockup } from "../lib/audit/mockup.js";
 import { detectRegister, vocabularyFor } from "../lib/audit/register.js";
+import { readMockupContent } from "../lib/audit/mockup.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -164,7 +165,7 @@ test("a mockup outside the clinic register uses none of its vocabulary", () => {
   const lines = [{ name: "Aragonite for Water Treatment", key: "aragonite for water" }];
 
   for (const register of ["supplier", "service"]) {
-    for (const html of [buildHomepageMockup(brand, lines, register), buildServicePageMockup(brand, lines, register)]) {
+    for (const html of [buildHomepageMockup(brand, lines, { register }), buildServicePageMockup(brand, lines, { register })]) {
       assert.doesNotMatch(html.replace(/<style[\s\S]*?<\/style>/g, ""), CLINIC_WORDS,
         `the ${register} register still speaks clinic`);
       assert.ok(html.includes("Aragonite for Water Treatment"), "still names what the site sells");
@@ -172,7 +173,7 @@ test("a mockup outside the clinic register uses none of its vocabulary", () => {
   }
 
   // The clinic register keeps the copy the clinic case was written for.
-  assert.match(buildHomepageMockup(brand, lines, "clinic"), CLINIC_WORDS);
+  assert.match(buildHomepageMockup(brand, lines, { register: "clinic" }), CLINIC_WORDS);
 });
 
 test("the default register is the neutral one, never the clinic", () => {
@@ -186,21 +187,95 @@ test("a mockup claims a location only when one was read", () => {
   const brand = extractBrandTokens("<p></p>", "https://example.test/", "Example");
   const lines = [{ name: "Line one", key: "line-one" }];
 
-  const withoutCity = buildHomepageMockup(brand, lines, "service");
+  const withoutCity = buildHomepageMockup(brand, lines, { register: "service" });
   assert.ok(!/your area/i.test(withoutCity), "never invents a service area");
   assert.ok(!/ in <\/h1>|and more in/i.test(withoutCity));
 
-  const withCity = buildHomepageMockup({ ...brand, city: "Bourne" }, lines, "service");
+  const withCity = buildHomepageMockup({ ...brand, city: "Bourne" }, lines, { register: "service" });
   assert.match(withCity, /Line one in Bourne/);
 });
 
 test("a single service line is not described as having more", () => {
   const brand = extractBrandTokens("<p></p>", "https://example.test/", "Example");
-  const one = buildHomepageMockup(brand, [{ name: "Line one", key: "line-one" }], "service");
+  const one = buildHomepageMockup(brand, [{ name: "Line one", key: "line-one" }], { register: "service" });
   assert.ok(!/and \d+ more/i.test(one));
 
   const three = buildHomepageMockup(brand, [
     { name: "Line one", key: "one" }, { name: "Line two", key: "two" }, { name: "Line three", key: "three" },
-  ], "service");
+  ], { register: "service" });
   assert.match(three, /and 2 more services/);
+});
+
+// A concept page carries the prospect's logo, so putting invented sentences on
+// it puts words in their mouth. Their own copy, or a stated gap.
+const CRAWLED = [
+  {
+    ok: true, url: "https://aragocor.test/", h1: ["Oolitic Aragonite Sized to Your Process"],
+    metaDescription: "96-98% calcium carbonate from Bahamian deposits.",
+    text: "Home Industries Contact Oolitic Aragonite Sized to Your Process 96-98% calcium carbonate.", h2: [], navLinks: [],
+  },
+  {
+    ok: true, url: "https://aragocor.test/industries/water-treatment", h1: ["Aragonite for Water Treatment"],
+    metaDescription: "",
+    text: "Home Industries Contact Aragonite for Water Treatment Aragonite raises alkalinity and stabilises pH in municipal water systems without a calcination step.",
+    h2: ["Grades supplied", "Packaging"], navLinks: [{ text: "Home" }, { text: "Industries" }],
+  },
+];
+const CRAWLED_LINES = [{
+  key: "aragonite for water", name: "Aragonite for Water Treatment",
+  siteUrl: "https://aragocor.test/industries/water-treatment", quote: "Aragonite for Water Treatment",
+}];
+
+test("page copy is read past the site's own navigation", () => {
+  const content = readMockupContent(CRAWLED, CRAWLED_LINES);
+  // The distilled text runs the header straight into the first paragraph.
+  assert.match(content.lines["aragonite for water"].summary, /^Aragonite raises alkalinity/);
+  assert.ok(!content.lines["aragonite for water"].summary.includes("Home Industries"));
+  // A deliberate summary beats scraped prose.
+  assert.equal(content.summary, "96-98% calcium carbonate from Bahamian deposits.");
+  assert.deepEqual(content.lines["aragonite for water"].points, ["Grades supplied", "Packaging"]);
+});
+
+test("a mockup quotes the prospect's own sentences and says where from", () => {
+  const brand = extractBrandTokens("<p></p>", "https://aragocor.test/", "AragoCor Minerals");
+  const content = readMockupContent(CRAWLED, CRAWLED_LINES);
+  const html = buildServicePageMockup(brand, CRAWLED_LINES, { register: "supplier", content });
+
+  assert.match(html, /Aragonite raises alkalinity/, "uses their sentence");
+  assert.match(html, /Read from \/industries\/water-treatment/, "credits the page it came from");
+  // The recommended structure is not passed off as copy they already have.
+  assert.match(html, /Proposed section/);
+});
+
+test("a section with nothing to quote says so instead of inventing copy", () => {
+  const brand = extractBrandTokens("<p></p>", "https://aragocor.test/", "AragoCor Minerals");
+  // A line whose page was never reached has no sentence to show.
+  const orphan = [{ key: "unread", name: "Unread line", siteUrl: "https://aragocor.test/unread", quote: "" }];
+  const content = readMockupContent(CRAWLED, orphan);
+  const html = buildHomepageMockup(brand, orphan, { register: "supplier", content });
+
+  assert.match(html, /No description was found/);
+  assert.doesNotMatch(html, /Aragonite raises alkalinity/);
+});
+
+test("a hostile stylesheet cannot break out of the mockup's own style block", () => {
+  // The prospect's site controls this text, and the mockup is served through
+  // srcDoc. A font-family that closes the style block used to run script on our
+  // origin, so the audit of a hostile site attacked whoever opened the concept.
+  const hostile = `<style>body{font-family: Arial</style><script>alert(document.domain)</script>}</style>`;
+  const brand = extractBrandTokens(hostile, "https://hostile.test/", "Hostile");
+  assert.ok(!/[<>]/.test(brand.fontStack), `font stack still carries markup: ${brand.fontStack}`);
+
+  const html = buildHomepageMockup(brand, [{ name: "Line", key: "line" }], { register: "service" });
+  assert.ok(!/<script/i.test(html), "no script reached the page");
+  // One style block, opened and closed exactly once.
+  assert.equal((html.match(/<\/style>/gi) ?? []).length, 1);
+});
+
+test("a real font stack still survives sanitising", () => {
+  const brand = extractBrandTokens(
+    `<style>body{font-family: "Helvetica Neue", Helvetica, Arial, sans-serif}</style>`,
+    "https://ok.test/", "OK",
+  );
+  assert.equal(brand.fontStack, "Helvetica Neue, Helvetica, Arial, sans-serif");
 });

@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   const denied = await requireDashboardApi();
   if (denied) return denied;
   try {
-    const body = (await request.json()) as { leadId?: number };
+    const body = (await request.json()) as { leadId?: number; fresh?: boolean };
     const leadId = Number(body.leadId);
     if (!Number.isInteger(leadId)) return Response.json({ error: "A prospect is required." }, { status: 400 });
 
@@ -24,11 +24,12 @@ export async function POST(request: Request) {
       return Response.json({ error: error instanceof Error ? error.message : "That website cannot be audited." }, { status: 400 });
     }
 
-    const run = await createAuditRun(leadId, website);
+    const fresh = Boolean(body.fresh);
+    const run = await createAuditRun(leadId, website, { freshCrawl: fresh });
     await db.insert(activities).values({
       leadId,
       activityType: "audit_run_started",
-      description: `Audit run #${run.id} queued for ${website}`,
+      description: `Audit run #${run.id} queued for ${website}${fresh ? " (fresh sources)" : ""}`,
     });
     return Response.json(await summarizeRun(run.id), { status: 201 });
   } catch (error) {

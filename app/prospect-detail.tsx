@@ -29,10 +29,19 @@ const proposalOffers = offerCatalog.filter((offer) => ["digital-presence-plan", 
 function initials(name: string) { return name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
 function tone(score: number) { return score < 55 ? "critical" : score < 75 ? "watch" : "good"; }
 
+/** The proposal scope suggested by what the audit found. */
+function seededScope(primaryFinding: string | undefined, googleFinding: string | undefined) {
+  return [primaryFinding, googleFinding && `Google presence: ${googleFinding}.`].filter(Boolean).join(" ")
+    || "Improve the highest-priority gaps identified in the digital presence audit.";
+}
+
 export default function ProspectDetail(props: Props) {
   const { lead, findings, opportunity, proposal, pagesAudited, busy } = props;
   const googleAudit = buildGooglePresenceAudit(lead);
-  const [tab, setTab] = useState<"summary" | "website" | "google" | "compare" | "blueprint" | "proposal">("summary");
+  // "engine" was missing from this union while the tab was rendered, selected
+  // and compared against — it worked at runtime and failed the typecheck three
+  // times over, which is how a real break would have hidden.
+  const [tab, setTab] = useState<"summary" | "website" | "google" | "engine" | "compare" | "blueprint" | "proposal">("summary");
   const [competitorBusy, setCompetitorBusy] = useState(false);
   const [googleDraft, setGoogleDraft] = useState({
     googleProfileUrl: lead.googleProfileUrl, googlePrimaryCategory: lead.googlePrimaryCategory, rating: lead.rating ?? 0,
@@ -50,7 +59,7 @@ export default function ProspectDetail(props: Props) {
   const [proposalTimeline, setProposalTimeline] = useState(suggestedOffer.timeline);
   const [proposalTitle, setProposalTitle] = useState(suggestedOffer.name);
   const [proposalOutcome, setProposalOutcome] = useState(suggestedOffer.outcome);
-  const [proposalScope, setProposalScope] = useState(opportunity?.primaryFinding || "Improve the highest-priority gaps identified in the digital presence audit.");
+  const [proposalScope, setProposalScope] = useState(seededScope(opportunity?.primaryFinding, googleAudit.findings[0]?.title));
   const [proposalDeliverables, setProposalDeliverables] = useState(suggestedOffer.deliverables.join("\n"));
   const blueprint = useMemo(() => buildDigitalBlueprint(lead, findings, googleAudit), [lead, findings, googleAudit.score, googleAudit.reviewed]);
   const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([]);
@@ -58,17 +67,16 @@ export default function ProspectDetail(props: Props) {
     try { return JSON.parse(props.auditSummary?.checkSummary || "[]"); } catch { return []; }
   }, [props.auditSummary?.checkSummary]);
 
-  useEffect(() => {
-    setTab("summary");
-    setSelectedRecommendations([]);
-    setGoogleDraft({ googleProfileUrl: lead.googleProfileUrl, googlePrimaryCategory: lead.googlePrimaryCategory, rating: lead.rating ?? 0, reviewCount: lead.reviewCount, googleReviewRecencyDays: lead.googleReviewRecencyDays, googleResponseRate: lead.googleResponseRate, googlePhotoCount: lead.googlePhotoCount, googlePostRecencyDays: lead.googlePostRecencyDays, googleProfileCompleteness: lead.googleProfileCompleteness, googleNapConsistent: lead.googleNapConsistent });
-  }, [lead.id]);
+  // The panel is keyed by lead id in the dashboard, so a different lead
+  // remounts it and the initialisers above are the reset. What still changes in
+  // place is the audit, which loads after this mounts, and the draft is
+  // re-seeded when it arrives.
   useEffect(() => {
     if (proposal) return;
     selectOffer(suggestedOffer.id);
-    const googleFinding = googleAudit.findings[0]?.title;
-    setProposalScope([opportunity?.primaryFinding, googleFinding && `Google presence: ${googleFinding}.`].filter(Boolean).join(" ") || "Improve the highest-priority gaps identified in the digital presence audit.");
+    setProposalScope(seededScope(opportunity?.primaryFinding, googleAudit.findings[0]?.title));
   }, [lead.score, lead.googleReviewedAt, opportunity?.primaryFinding]);
+
 
   const draftGoogleAudit = useMemo(() => buildGooglePresenceAudit({ ...lead, ...googleDraft, googleReviewedAt: lead.googleReviewedAt || new Date().toISOString() }), [lead, googleDraft]);
   const combinedScore = lead.score && googleAudit.reviewed ? Math.round(lead.score * .6 + googleAudit.score * .4) : lead.score || googleAudit.score || 0;

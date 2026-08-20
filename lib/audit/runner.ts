@@ -152,9 +152,9 @@ async function availableKeys() {
   return Object.fromEntries(names.map((name, index) => [name, values[index]]));
 }
 
-export async function createAuditRun(leadId: number, website: string) {
+export async function createAuditRun(leadId: number, website: string, { freshCrawl = false } = {}) {
   const db = await getDb();
-  const [run] = await db.insert(auditRuns).values({ leadId, website, status: "Queued" }).returning();
+  const [run] = await db.insert(auditRuns).values({ leadId, website, status: "Queued", freshCrawl }).returning();
   await db.insert(auditRunModules).values(auditModules.map((module) => ({
     runId: run.id,
     module: module.id,
@@ -195,21 +195,32 @@ async function claimNextModule(runId: number) {
 /**
  * Reuse a payload already fetched for this request key today, so the same
  * target is never hit twice in one day and a re-score never needs a re-fetch.
+ *
+ * `onlyRunId` narrows that window to a single run. A run asking for fresh
+ * sources wants to ignore what earlier runs read today — not to switch caching
+ * off, which would make every module re-fetch the same crawl and hit the
+ * prospect's site once per module instead of once. So fresh narrows the window
+ * rather than removing it, and a retry within the run still reuses what the
+ * previous attempt already got.
  */
-async function cachedPayload(requestKey: string) {
+async function cachedPayload(requestKey: string, onlyRunId?: number) {
   const db = await getDb();
   const [row] = await db
     .select()
     .from(rawPayloads)
-    .where(and(eq(rawPayloads.requestKey, requestKey), eq(rawPayloads.fetchedOn, today())))
+    .where(and(
+      eq(rawPayloads.requestKey, requestKey),
+      eq(rawPayloads.fetchedOn, today()),
+      ...(onlyRunId === undefined ? [] : [eq(rawPayloads.runId, onlyRunId)]),
+    ))
     .orderBy(desc(rawPayloads.id))
     .limit(1);
   return row ?? null;
 }
 
-function cacheLookupFor(): CacheLookup {
+function cacheLookupFor(onlyRunId?: number): CacheLookup {
   return async (requestKey: string) => {
-    const row = await cachedPayload(requestKey);
+    const row = await cachedPayload(requestKey, onlyRunId);
     // A cached failure is not reused: a throttled source deserves a real retry.
     if (!row || !row.ok) return null;
     let parsed: unknown = null;
@@ -218,7 +229,7 @@ function cacheLookupFor(): CacheLookup {
   };
 }
 
-async function storePayloads(runId: number, moduleId: string, payloads: StoredPayload[]) {
+async function storePayloads(runId: number, moduleId: string, payloads: StoredPayload[], onlyRunId?: number) {
   const db = await getDb();
   const ids: number[] = [];
   const reused: string[] = [];
@@ -226,7 +237,7 @@ async function storePayloads(runId: number, moduleId: string, payloads: StoredPa
     // Only a successful payload is deduplicated. Each failed attempt is stored
     // on its own so the retry history stays readable, and so a stale failure
     // reason never stands in for a fresh one.
-    const existing = payload.ok ? await cachedPayload(payload.requestKey) : null;
+    const existing = payload.ok ? await cachedPayload(payload.requestKey, onlyRunId) : null;
     if (existing && existing.ok) {
       ids.push(existing.id);
       reused.push(payload.source);
@@ -249,7 +260,7 @@ async function storePayloads(runId: number, moduleId: string, payloads: StoredPa
   return { ids, reused };
 }
 
-async function runModule(runId: number, moduleId: string, context: CollectContext, attempts: number, maxAttempts: number): Promise<ModuleOutcome> {
+async function runModule(runId: number, moduleId: string, context: CollectContext, attempts: number, maxAttempts: number, freshCrawl = false): Promise<ModuleOutcome> {
   const definition = moduleById(moduleId);
   if (!definition) {
     return { status: "Failed", message: `Unknown module ${moduleId}.`, findings: [], checks: [], costCents: 0, payloadIds: [] };
@@ -270,9 +281,13 @@ async function runModule(runId: number, moduleId: string, context: CollectContex
     return { status: "Failed", message: `Module ${moduleId} has no implementation.`, findings: [], checks: [], costCents: 0, payloadIds: [] };
   }
 
+  // A fresh run sees only its own payloads, so earlier runs today do not stand
+  // in for the fetch it asked for.
+  const cacheScope = freshCrawl ? runId : undefined;
+
   let collected;
   try {
-    collected = await collect(context, keys, cacheLookupFor());
+    collected = await collect(context, keys, cacheLookupFor(cacheScope));
   } catch (error) {
     // A collector that throws is a module failure, never a run failure.
     return {
@@ -282,7 +297,7 @@ async function runModule(runId: number, moduleId: string, context: CollectContex
     };
   }
 
-  const { ids, reused } = await storePayloads(runId, moduleId, collected.payloads);
+  const { ids, reused } = await storePayloads(runId, moduleId, collected.payloads, cacheScope);
   const analysis = normalizeAnalysis(analyze(collected.payloads));
   const note = reused.length ? ` Reused today's cached ${[...new Set(reused)].join(", ")}.` : "";
 
@@ -366,7 +381,7 @@ export async function tickAuditRun(runId: number) {
   }
 
   const [leadRow] = await db.select().from(leads).where(eq(leads.id, run.leadId)).limit(1);
-  const outcome = await runModule(runId, claimed.module, { website: run.website, lead: leadRow ?? {} }, claimed.attempts, claimed.maxAttempts);
+  const outcome = await runModule(runId, claimed.module, { website: run.website, lead: leadRow ?? {} }, claimed.attempts, claimed.maxAttempts, Boolean(run.freshCrawl));
 
   // A retryable failure goes back on the queue rather than ending the module.
   if (outcome.status === "Retrying") {

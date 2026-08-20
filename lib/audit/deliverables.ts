@@ -4,7 +4,7 @@ import { auditRunModules, auditRuns, findings as findingsTable, leads, mockups, 
 import { assertEvidence, buildRecommendations, groundRationale } from "@/lib/audit/recommendations";
 import { buildVoicePrompt, composeOpening, hasSendableHook, planFromFindings, selectOpeningFindings, validateVoice } from "@/lib/audit/proposal-voice";
 import { extractBrandTokens } from "@/lib/audit/brand";
-import { buildHomepageMockup, buildServicePageMockup } from "@/lib/audit/mockup";
+import { buildHomepageMockup, buildServicePageMockup, readMockupContent } from "@/lib/audit/mockup";
 import { detectRegister } from "@/lib/audit/register";
 import { runtimeValue } from "@/lib/runtime-env";
 import pricingConfig from "@/config/pricing.json";
@@ -210,64 +210,55 @@ async function writeRationale(apiKey: string, recommendation: { label: string },
 }
 
 /**
- * A proposal draft, priced from the audit. Deliverables are selected by what
- * the run found, one band each, and no figure is emitted that does not trace
- * back to config/pricing.json.
+ * Price what a set of findings triggers.
+ *
+ * `findingIds` is the operator's selection; omit it and the whole run counts.
+ * The live preview they adjust the selection against and the proposal that is
+ * finally written both come through here, so the figure on screen while
+ * choosing is the figure that gets stored.
  */
-export async function buildRunProposal(runId: number) {
+async function priceFromFindings(runId: number, findingIds?: number[] | null) {
   const db = await getDb();
-  const [run] = await db.select().from(auditRuns).where(eq(auditRuns.id, runId)).limit(1);
-  if (!run) throw new Error("Audit run not found.");
-  const recs = await db.select().from(recommendations).where(eq(recommendations.runId, runId)).orderBy(recommendations.sortOrder);
-  if (!recs.length) throw new Error("Build the recommendations before the proposal.");
+  const config = pricing();
 
   const stored = await db.select().from(findingsTable).where(eq(findingsTable.runId, runId)).orderBy(findingsTable.sortOrder);
-  assertEvidence(recs.map((rec) => ({ label: rec.label, findingIds: JSON.parse(rec.findingIds) as number[] })), stored);
+  const allowed = findingIds ? new Set(findingIds) : null;
+  const chosen = allowed ? stored.filter((finding) => allowed.has(finding.id)) : stored;
 
-  const config = pricing();
   const payloads = await runPayloads(runId);
   const crawl = payloads.find((payload) => payload.source === "crawl");
   const sitemap = payloads.find((payload) => payload.source === "sitemap");
   const places = payloads.find((payload) => payload.source === "places");
+  const googleKnown = Boolean(places?.ok && places.payload);
   const serviceLines = await serviceLinesFor(runId);
 
   const selected = selectDeliverables(config, {
-    findings: stored,
+    findings: chosen,
     serviceLines,
     diagnostics: (crawl?.payload as { diagnostics?: Record<string, unknown> } | null)?.diagnostics ?? null,
     sitemap: (sitemap?.ok ? sitemap.payload : null) as Record<string, unknown> | null,
-    googleKnown: Boolean(places?.ok && places.payload),
+    googleKnown,
   });
-  if (!selected.length) {
-    throw new Error("The audit did not trigger any priced deliverable, so there is nothing to propose.");
+
+  const priced = selected.length ? priceProposal(config, selected) : null;
+  if (priced) {
+    // A figure that cannot be traced to the file is a refusal, not a rounding.
+    const traced = verifyFigures(config, priced);
+    if (!traced.valid) throw new Error(`Pricing failed its own check: ${traced.problems.join(" ")}`);
   }
 
-  const priced = priceProposal(config, selected);
-  // A figure that cannot be traced to the file is a refusal, not a rounding.
-  const traced = verifyFigures(config, priced);
-  if (!traced.valid) throw new Error(`Pricing failed its own check: ${traced.problems.join(" ")}`);
-
   const retainer = selectRetainer(config, {
-    googleKnown: Boolean(places?.ok && places.payload),
-    googleFindings: stored.filter((finding) => finding.module === "google"),
+    googleKnown,
+    googleFindings: chosen.filter((finding) => finding.module === "google"),
     serviceLineGaps: serviceLines.filter((line) => line.hasLandingPage === false).length,
   });
 
-  const [lead] = await db.select().from(leads).where(eq(leads.id, run.leadId)).limit(1);
-  const runMockups = await db.select().from(mockups).where(eq(mockups.runId, runId));
-  const voice = await voiceSample();
-  const opening = await writeOpening({
-    businessName: lead?.agencyName ?? "this business",
-    findings: stored,
-    recommendations: recs,
-    mockups: runMockups,
-    voicePlaceholder: voice.placeholder,
-  });
+  return { config, stored, chosen, serviceLines, priced, retainer, places, googleKnown };
+}
 
-  const [previous] = await db.select().from(proposals).where(eq(proposals.leadId, run.leadId)).orderBy(desc(proposals.version)).limit(1);
-  const version = (previous?.version ?? 0) + 1;
-
-  const scopeItems = priced.lines.map((line) => ({
+/** One priced line, in the shape both the preview and the stored proposal use. */
+function scopeItemsFrom(priced: NonNullable<Awaited<ReturnType<typeof priceFromFindings>>["priced"]>, config: PricingConfig) {
+  return priced.lines.map((line) => ({
     deliverable: line.id,
     label: line.label,
     band: line.bandKey,
@@ -282,6 +273,64 @@ export async function buildRunProposal(runId: number) {
     rationale: line.rationale,
     findingIds: line.findingIds,
   }));
+}
+
+/**
+ * What a selection would cost, without writing anything. The operator moves
+ * the selection and watches the scope follow; nothing is stored until they
+ * build the proposal.
+ */
+export async function previewRunProposal(runId: number, findingIds?: number[] | null) {
+  const { config, stored, chosen, priced, retainer } = await priceFromFindings(runId, findingIds);
+  return {
+    scopeItems: priced ? scopeItemsFrom(priced, config) : [],
+    priceDisplay: priced ? formatFigure(config, { min: priced.totalMin, max: priced.totalMax }) : "",
+    minimumApplied: Boolean(priced?.belowMinimum),
+    retainer: retainer ? { ...retainer, display: formatFigure(config, retainer) } : null,
+    chosenCount: chosen.length,
+    totalCount: stored.length,
+    // Said plainly: an empty scope is a selection that triggers no priced work,
+    // not a failure to calculate.
+    message: priced ? "" : "Nothing in this selection triggers a priced deliverable.",
+  };
+}
+
+/**
+ * A proposal draft, priced from the audit. Deliverables are selected by what
+ * the run found, one band each, and no figure is emitted that does not trace
+ * back to config/pricing.json.
+ */
+export async function buildRunProposal(runId: number, findingIds?: number[] | null) {
+  const db = await getDb();
+  const [run] = await db.select().from(auditRuns).where(eq(auditRuns.id, runId)).limit(1);
+  if (!run) throw new Error("Audit run not found.");
+  const recs = await db.select().from(recommendations).where(eq(recommendations.runId, runId)).orderBy(recommendations.sortOrder);
+  if (!recs.length) throw new Error("Build the recommendations before the proposal.");
+
+  const { config, stored, chosen, priced, retainer } = await priceFromFindings(runId, findingIds);
+  assertEvidence(recs.map((rec) => ({ label: rec.label, findingIds: JSON.parse(rec.findingIds) as number[] })), stored);
+
+  if (!priced) {
+    throw new Error(findingIds
+      ? "Nothing in the chosen findings triggers a priced deliverable."
+      : "The audit did not trigger any priced deliverable, so there is nothing to propose.");
+  }
+
+  const [lead] = await db.select().from(leads).where(eq(leads.id, run.leadId)).limit(1);
+  const runMockups = await db.select().from(mockups).where(eq(mockups.runId, runId));
+  const voice = await voiceSample();
+  const opening = await writeOpening({
+    businessName: lead?.agencyName ?? "this business",
+    findings: chosen,
+    recommendations: recs,
+    mockups: runMockups,
+    voicePlaceholder: voice.placeholder,
+  });
+
+  const [previous] = await db.select().from(proposals).where(eq(proposals.leadId, run.leadId)).orderBy(desc(proposals.version)).limit(1);
+  const version = (previous?.version ?? 0) + 1;
+
+  const scopeItems = scopeItemsFrom(priced, config);
 
   const [proposal] = await db.insert(proposals).values({
     leadId: run.leadId, runId, version, token: makeToken(),
@@ -357,11 +406,17 @@ export async function buildRunMockups(runId: number) {
     siteText: crawledPages.map((page) => [page.text, ...(page.h1 ?? []), ...(page.h2 ?? [])].filter(Boolean).join(" ")).join(" "),
   });
 
+  // The prospect's own sentences, matched to the lines they belong to. A
+  // concept page built from these shows their business rearranged; one built
+  // from placeholder prose only shows a layout.
+  const content = readMockupContent(crawledPages, serviceLines);
+  const options = { register: register.register, content };
+
   await db.delete(mockups).where(eq(mockups.runId, runId));
 
   const built = [
-    { kind: "homepage", title: "Homepage concept", html: buildHomepageMockup(brand, serviceLines, register.register) },
-    { kind: "service-page", title: `${serviceLines[0]?.name ?? "Service"} page concept`, html: buildServicePageMockup(brand, serviceLines, register.register) },
+    { kind: "homepage", title: "Homepage concept", html: buildHomepageMockup(brand, serviceLines, options) },
+    { kind: "service-page", title: `${serviceLines[0]?.name ?? "Service"} page concept`, html: buildServicePageMockup(brand, serviceLines, options) },
   ];
 
   await db.insert(mockups).values(built.map((mockup) => ({
@@ -374,6 +429,18 @@ export async function buildRunMockups(runId: number) {
   })));
 
   return db.select().from(mockups).where(eq(mockups.runId, runId));
+}
+
+/**
+ * The mockup without counting a view. The proposal embeds the concept pages, so
+ * counting those would make the view count mean "the proposal was opened"
+ * rather than "someone went and looked at the concept", which is the only
+ * reason to record it.
+ */
+export async function readMockup(token: string) {
+  const db = await getDb();
+  const [mockup] = await db.select().from(mockups).where(eq(mockups.token, token)).limit(1);
+  return mockup ?? null;
 }
 
 export async function recordMockupView(token: string) {

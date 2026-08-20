@@ -23,6 +23,10 @@ evidence, and is weighted accordingly.
    per-module detail.
 3. The run advances one module at a time. Nothing is lost if you close the tab —
    the whole run lives in the database and resumes on the next tick.
+   Successful fetches are cached for the calendar day, so a second run of the
+   same site reuses them. Tick **Fetch the sources again** to ignore what
+   earlier runs read today — the run still shares one crawl across its own
+   modules, so the prospect's site is fetched once, not once per module.
 4. When it finishes, **Build report, proposal and mockups** produces the package.
 
 Every artifact is a draft. Nothing in this system sends anything to a prospect.
