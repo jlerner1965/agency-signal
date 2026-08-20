@@ -25,6 +25,7 @@ export async function collectGoogle(context: CollectContext, keys: Record<string
     payloads.push({
       source: "crawl", requestKey: cKey, ok: Boolean(home?.ok),
       retryable: Boolean(!home?.ok && crawl.homeRetryable),
+      throttled: home?.status === 429,
       failureReason: home?.ok ? "" : home?.reason ?? "The website could not be reached.",
       payload: { pages: crawl.pages.map((page, index) => distillPage(page, { keepMarkup: index === 0 })), navigation: crawl.navigation, homeCss: crawl.homeCss, diagnostics: crawl.diagnostics, manual: {} },
     });
@@ -40,7 +41,7 @@ export async function collectGoogle(context: CollectContext, keys: Record<string
     });
     networkCalls += places.calls;
     costCents += places.costCents;
-    payloads.push({ source: "places", requestKey: pKey, ok: places.ok, retryable: places.retryable, failureReason: places.reason, payload: places.payload });
+    payloads.push({ source: "places", requestKey: pKey, ok: places.ok, retryable: places.retryable, throttled: places.throttled, failureReason: places.reason, payload: places.payload });
   }
 
   // Values a person entered from the live profile, for the fields the API does

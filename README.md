@@ -136,7 +136,13 @@ npm run setup -- --email you@example.com --password 'a long passphrase' \
 
 It writes `.dev.vars`, which is git-ignored and read by the local Worker, and
 prints the same values for the hosted runtime. The password itself is never
-stored. Re-run `npm run auth:credentials` to rotate the login or add a key later.
+stored. Re-run `npm run auth:credentials` to rotate the login, or pass a key flag
+on its own to add a key without touching the login:
+
+```bash
+npm run auth:credentials -- --pagespeed-key KEY   # login and sessions untouched
+npm run auth:credentials                          # rotates the login
+```
 
 ### API keys
 

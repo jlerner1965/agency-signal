@@ -15,6 +15,8 @@ const SEARCH_FIELDS = ["places.id", "places.displayName", "places.formattedAddre
 export type PlacesResult = {
   ok: boolean;
   retryable: boolean;
+  /** Places rate-limited us, so the wait is for a quota window, not a blip. */
+  throttled: boolean;
   reason: string;
   payload: Record<string, unknown> | null;
   costCents: number;
@@ -53,7 +55,7 @@ export async function fetchPlaceDetails(
   { placeId, name, city, state }: { placeId?: string; name?: string; city?: string; state?: string },
 ): Promise<PlacesResult> {
   if (!apiKey) {
-    return { ok: false, retryable: false, reason: "GOOGLE_PLACES_API_KEY is not configured.", payload: null, costCents: 0, calls: 0 };
+    return { ok: false, retryable: false, throttled: false, reason: "GOOGLE_PLACES_API_KEY is not configured.", payload: null, costCents: 0, calls: 0 };
   }
   let cost = 0;
   let calls = 0;
@@ -63,7 +65,7 @@ export async function fetchPlaceDetails(
     if (!resolvedId) {
       const query = [name, city, state].filter(Boolean).join(", ").trim();
       if (!query) {
-        return { ok: false, retryable: false, reason: "No place id, and no business name or city to search with.", payload: null, costCents: 0, calls: 0 };
+        return { ok: false, retryable: false, throttled: false, reason: "No place id, and no business name or city to search with.", payload: null, costCents: 0, calls: 0 };
       }
       const search = await call("https://places.googleapis.com/v1/places:searchText", apiKey, SEARCH_FIELDS, {
         method: "POST",
@@ -73,12 +75,12 @@ export async function fetchPlaceDetails(
       calls += 1;
       cost += costOf("placesTextSearch");
       if (!search.ok) {
-        return { ok: false, retryable: retryable(search.status), reason: `Places text search returned HTTP ${search.status}. ${search.detail}`.trim(), payload: null, costCents: cost, calls };
+        return { ok: false, retryable: retryable(search.status), throttled: search.status === 429, reason: `Places text search returned HTTP ${search.status}. ${search.detail}`.trim(), payload: null, costCents: cost, calls };
       }
       const places = (search.body?.places ?? []) as Array<{ id?: string }>;
       resolvedId = places[0]?.id ?? "";
       if (!resolvedId) {
-        return { ok: false, retryable: false, reason: `No Google Business Profile matched “${query}”.`, payload: null, costCents: cost, calls };
+        return { ok: false, retryable: false, throttled: false, reason: `No Google Business Profile matched “${query}”.`, payload: null, costCents: cost, calls };
       }
     }
 
@@ -86,13 +88,14 @@ export async function fetchPlaceDetails(
     calls += 1;
     cost += costOf("placesDetails");
     if (!details.ok) {
-      return { ok: false, retryable: retryable(details.status), reason: `Places details returned HTTP ${details.status}. ${details.detail}`.trim(), payload: null, costCents: cost, calls };
+      return { ok: false, retryable: retryable(details.status), throttled: details.status === 429, reason: `Places details returned HTTP ${details.status}. ${details.detail}`.trim(), payload: null, costCents: cost, calls };
     }
-    return { ok: true, retryable: false, reason: "", payload: details.body, costCents: cost, calls };
+    return { ok: true, retryable: false, throttled: false, reason: "", payload: details.body, costCents: cost, calls };
   } catch (error) {
     return {
       ok: false,
       retryable: true,
+      throttled: false,
       reason: `Places did not respond: ${error instanceof Error ? error.message : "unknown error"}.`,
       payload: null, costCents: cost, calls,
     };

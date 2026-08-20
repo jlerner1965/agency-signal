@@ -24,6 +24,16 @@ function isRetryableStatus(status: number) {
   return status === 429 || (status >= 500 && status < 600);
 }
 
+/**
+ * `Retry-After` in its delay-seconds form. The HTTP-date form is left to the
+ * backoff curve rather than guessed at, which is safe: the curve is the
+ * fallback, not a shortcut past one.
+ */
+function retryAfterSeconds(response: Response) {
+  const value = Number((response.headers.get("retry-after") ?? "").trim());
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 async function fetchDocument(url: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -37,9 +47,9 @@ async function fetchDocument(url: string) {
     const server = response.headers.get("server") ?? "";
     const body = contentType.includes("text/html") ? (await response.text()).slice(0, 1_500_000) : "";
     const blocked = describeBlock(response.status, server, body);
-    if (blocked) return { ok: false as const, reason: blocked, retryable: isRetryableStatus(response.status), status: response.status, finalUrl: response.url || url, server, html: "" };
+    if (blocked) return { ok: false as const, reason: blocked, retryable: isRetryableStatus(response.status), throttled: response.status === 429, retryAfter: retryAfterSeconds(response), status: response.status, finalUrl: response.url || url, server, html: "" };
     if (!contentType.includes("text/html")) {
-      return { ok: false as const, reason: `The URL returned ${contentType || "an unknown content type"} rather than an HTML page.`, retryable: false, status: response.status, finalUrl: response.url || url, server, html: "" };
+      return { ok: false as const, reason: `The URL returned ${contentType || "an unknown content type"} rather than an HTML page.`, retryable: false, throttled: false, retryAfter: 0, status: response.status, finalUrl: response.url || url, server, html: "" };
     }
     return {
       ok: true as const,
@@ -56,7 +66,7 @@ async function fetchDocument(url: string) {
       ? `The site did not respond within ${FETCH_TIMEOUT_MS / 1000} seconds.`
       : `The site could not be reached: ${error instanceof Error ? error.message : "unknown network error"}.`;
     // A timeout or transport error may be transient, so it is worth retrying.
-    return { ok: false as const, reason, retryable: true, status: 0, finalUrl: url, server: "", html: "" };
+    return { ok: false as const, reason, retryable: true, throttled: false, retryAfter: 0, status: 0, finalUrl: url, server: "", html: "" };
   } finally {
     clearTimeout(timer);
   }
@@ -74,11 +84,11 @@ async function fetchPageSpeed(url: string, strategy: "mobile" | "desktop", apiKe
       const detail = response.status === 429
         ? `PageSpeed rate-limited the request${apiKey ? "" : " (no API key configured, so the unkeyed quota applies)"}.`
         : `PageSpeed returned HTTP ${response.status}.`;
-      return { ok: false as const, reason: detail, retryable: isRetryableStatus(response.status), payload: null };
+      return { ok: false as const, reason: detail, retryable: isRetryableStatus(response.status), throttled: response.status === 429, retryAfter: retryAfterSeconds(response), payload: null };
     }
-    return { ok: true as const, reason: "", retryable: false, payload: await response.json() };
+    return { ok: true as const, reason: "", retryable: false, throttled: false, retryAfter: 0, payload: await response.json() };
   } catch (error) {
-    return { ok: false as const, reason: `PageSpeed did not respond: ${error instanceof Error ? error.message : "unknown error"}.`, retryable: true, payload: null };
+    return { ok: false as const, reason: `PageSpeed did not respond: ${error instanceof Error ? error.message : "unknown error"}.`, retryable: true, throttled: false, retryAfter: 0, payload: null };
   } finally {
     clearTimeout(timer);
   }
@@ -105,6 +115,8 @@ export async function collectTechnical(context: CollectContext, keys: Record<str
       requestKey: documentKey,
       ok: document.ok,
       retryable: document.ok ? false : document.retryable,
+      throttled: document.ok ? false : document.throttled,
+      retryAfterSeconds: document.ok ? 0 : document.retryAfter,
       failureReason: document.ok ? "" : document.reason,
       payload: document.ok
         ? { status: document.status, finalUrl: document.finalUrl, server: document.server, redirected: document.redirected, html: document.html }
@@ -165,6 +177,8 @@ export async function collectTechnical(context: CollectContext, keys: Record<str
       requestKey: psiKey,
       ok: result.ok,
       retryable: result.retryable,
+      throttled: result.throttled,
+      retryAfterSeconds: result.retryAfter,
       failureReason: result.reason,
       payload: result.payload,
     });
