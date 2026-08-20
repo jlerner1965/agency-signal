@@ -9,6 +9,7 @@ import { detectRegister } from "@/lib/audit/register";
 import { runtimeValue } from "@/lib/runtime-env";
 import pricingConfig from "@/config/pricing.json";
 import { formatFigure, priceProposal, selectDeliverables, selectRetainer, verifyFigures } from "@/lib/audit/pricing";
+import { defaultSections, normalizeSections, sectionOptions } from "@/lib/audit/proposal-sections";
 
 const makeToken = () => crypto.randomUUID().replaceAll("-", "");
 
@@ -253,7 +254,7 @@ async function priceFromFindings(runId: number, findingIds?: number[] | null) {
     serviceLineGaps: serviceLines.filter((line) => line.hasLandingPage === false).length,
   });
 
-  return { config, stored, chosen, serviceLines, priced, retainer, places, googleKnown };
+  return { config, stored, chosen, serviceLines, priced, retainer, places, googleKnown, crawl };
 }
 
 /** One priced line, in the shape both the preview and the stored proposal use. */
@@ -276,12 +277,62 @@ function scopeItemsFrom(priced: NonNullable<Awaited<ReturnType<typeof priceFromF
 }
 
 /**
+ * What this run holds to build a document out of, in the shape the picker
+ * reads. Every figure here is counted rather than assumed: a part is offered
+ * because the evidence behind it exists in this run, and the reason a part is
+ * not on offer is the reason the count came back empty.
+ */
+async function runInventory(runId: number, {
+  chosen, serviceLines, priced, config, crawlOk,
+}: {
+  chosen: Array<{ id: number; category: string; severity: string; title: string; evidence: string; recommendation: string; impactNote: string; priority: number }>;
+  serviceLines: Array<{ googleRepresented: boolean | null }>;
+  priced: Awaited<ReturnType<typeof priceFromFindings>>["priced"];
+  config: PricingConfig;
+  crawlOk: boolean;
+}) {
+  const db = await getDb();
+  const modules = await db.select().from(auditRunModules).where(eq(auditRunModules.runId, runId));
+  const unmeasured = modules.flatMap((module) => {
+    try { return JSON.parse(module.checkSummary || "[]") as Array<{ status?: string }>; } catch { return []; }
+  }).filter((check) => check.status === "unverified").length;
+
+  const built = await db.select().from(mockups).where(eq(mockups.runId, runId));
+  const voice = await voiceSample();
+  // The same gate the opening itself runs, asked before the build rather than
+  // discovered after it: an opening that would be refused is not offered.
+  const sendable = hasSendableHook(chosen);
+
+  return {
+    findings: chosen.length,
+    serviceLines: serviceLines.length,
+    serviceLineGaps: serviceLines.filter((line) => line.googleRepresented === false).length,
+    scopeItems: priced ? priced.lines.length : 0,
+    priceDisplay: priced ? formatFigure(config, { min: priced.totalMin, max: priced.totalMax }) : "",
+    unmeasured,
+    mockups: built.length,
+    mockupsBuildable: crawlOk,
+    openingWritable: !voice.placeholder && sendable.sendable,
+    openingReason: voice.placeholder
+      ? "config/voice.md is still a placeholder, so no opening can be written."
+      : sendable.reason,
+  };
+}
+
+/**
  * What a selection would cost, without writing anything. The operator moves
  * the selection and watches the scope follow; nothing is stored until they
  * build the proposal.
+ *
+ * The parts on offer come back with it, because they follow the same
+ * selection: drop the coverage findings and the coverage table stops being
+ * something this document can carry.
  */
 export async function previewRunProposal(runId: number, findingIds?: number[] | null) {
-  const { config, stored, chosen, priced, retainer } = await priceFromFindings(runId, findingIds);
+  const { config, stored, chosen, serviceLines, priced, retainer, crawl } = await priceFromFindings(runId, findingIds);
+  const options = sectionOptions(await runInventory(runId, {
+    chosen, serviceLines, priced, config, crawlOk: Boolean(crawl?.ok),
+  }));
   return {
     scopeItems: priced ? scopeItemsFrom(priced, config) : [],
     priceDisplay: priced ? formatFigure(config, { min: priced.totalMin, max: priced.totalMax }) : "",
@@ -289,6 +340,8 @@ export async function previewRunProposal(runId: number, findingIds?: number[] | 
     retainer: retainer ? { ...retainer, display: formatFigure(config, retainer) } : null,
     chosenCount: chosen.length,
     totalCount: stored.length,
+    sections: options,
+    defaultSections: defaultSections(options),
     // Said plainly: an empty scope is a selection that triggers no priced work,
     // not a failure to calculate.
     message: priced ? "" : "Nothing in this selection triggers a priced deliverable.",
@@ -299,15 +352,19 @@ export async function previewRunProposal(runId: number, findingIds?: number[] | 
  * A proposal draft, priced from the audit. Deliverables are selected by what
  * the run found, one band each, and no figure is emitted that does not trace
  * back to config/pricing.json.
+ *
+ * `sections` is what the operator ticked before building. Omitted, the
+ * document carries every part this run can fill, which is what the button did
+ * before the picker existed.
  */
-export async function buildRunProposal(runId: number, findingIds?: number[] | null) {
+export async function buildRunProposal(runId: number, findingIds?: number[] | null, sections?: string[] | null) {
   const db = await getDb();
   const [run] = await db.select().from(auditRuns).where(eq(auditRuns.id, runId)).limit(1);
   if (!run) throw new Error("Audit run not found.");
   const recs = await db.select().from(recommendations).where(eq(recommendations.runId, runId)).orderBy(recommendations.sortOrder);
   if (!recs.length) throw new Error("Build the recommendations before the proposal.");
 
-  const { config, stored, chosen, priced, retainer } = await priceFromFindings(runId, findingIds);
+  const { config, stored, chosen, serviceLines, priced, retainer, crawl } = await priceFromFindings(runId, findingIds);
   assertEvidence(recs.map((rec) => ({ label: rec.label, findingIds: JSON.parse(rec.findingIds) as number[] })), stored);
 
   if (!priced) {
@@ -317,15 +374,29 @@ export async function buildRunProposal(runId: number, findingIds?: number[] | nu
   }
 
   const [lead] = await db.select().from(leads).where(eq(leads.id, run.leadId)).limit(1);
-  const runMockups = await db.select().from(mockups).where(eq(mockups.runId, runId));
+  const chosenSections = normalizeSections(sections ?? null, sectionOptions(await runInventory(runId, {
+    chosen, serviceLines, priced, config, crawlOk: Boolean(crawl?.ok),
+  })));
+
+  // Concept pages left out of the document are also left out of the opening.
+  // The voice rules let the opening offer to show a page; offering one the
+  // reader has no way to reach is the same broken promise as describing an
+  // asset that was never built.
+  const runMockups = chosenSections.includes("concepts")
+    ? await db.select().from(mockups).where(eq(mockups.runId, runId))
+    : [];
   const voice = await voiceSample();
-  const opening = await writeOpening({
-    businessName: lead?.agencyName ?? "this business",
-    findings: chosen,
-    recommendations: recs,
-    mockups: runMockups,
-    voicePlaceholder: voice.placeholder,
-  });
+  const opening = chosenSections.includes("opening")
+    ? await writeOpening({
+      businessName: lead?.agencyName ?? "this business",
+      findings: chosen,
+      recommendations: recs,
+      mockups: runMockups,
+      voicePlaceholder: voice.placeholder,
+    })
+    // Not asked for is not the same as refused. An opening nobody wanted must
+    // not block the export the way an opening that could not be written does.
+    : { text: "", source: "not-included", blocked: "" };
 
   const [previous] = await db.select().from(proposals).where(eq(proposals.leadId, run.leadId)).orderBy(desc(proposals.version)).limit(1);
   const version = (previous?.version ?? 0) + 1;
@@ -350,6 +421,7 @@ export async function buildRunProposal(runId: number, findingIds?: number[] | nu
     // A reference the reader cannot follow is the same problem as one that
     // describes an asset that does not exist.
     mockupLinks: JSON.stringify(runMockups.map((mockup) => ({ kind: mockup.kind, title: mockup.title, url: `/mockup/${mockup.token}` }))),
+    sections: JSON.stringify(chosenSections),
     minimumApplied: priced.belowMinimum,
     timeline: "",
     tier: priced.lines[0].bandKey,

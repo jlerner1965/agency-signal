@@ -4,6 +4,7 @@ import { activities, auditFindings, auditRunModules, auditRuns, audits, competit
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
 import { serviceLinesFor } from "@/lib/audit/deliverables";
+import { carries, readSections } from "@/lib/audit/proposal-sections";
 
 /** Stored JSON columns are parsed once here so no reader has to guess a shape. */
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
@@ -79,11 +80,17 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
         scopeItems: parseJson<unknown[]>(proposal.scopeItems, []),
         mockupLinks: parseJson<unknown[]>(proposal.mockupLinks, []),
         retainer: parseJson<unknown>(proposal.retainer, null),
+        // Which parts were ticked before it was built. Null on every proposal
+        // built before the picker existed, and the view reads that as the
+        // document it used to render rather than as an empty one.
+        sections: readSections(proposal.sections),
       },
       // The gap between what the site sells and what Google carries is the
       // argument this document is making, so it belongs in the document rather
       // than in a separate report the reader has to be sent to.
-      serviceLines: proposal.runId ? await serviceLinesFor(proposal.runId) : [],
+      serviceLines: proposal.runId && carries(readSections(proposal.sections), "coverage")
+        ? await serviceLinesFor(proposal.runId)
+        : [],
       lead: { agencyName: lead.agencyName, contactName: lead.contactName, city: lead.city, state: lead.state },
       audit: audit && audit.confidenceScore > 0 ? { score: audit.score, pagesAudited: audit.pagesAudited, confidenceScore: audit.confidenceScore, checksPassed: audit.checksPassed, checksFailed: audit.checksFailed, createdAt: audit.createdAt } : null,
       googleAudit: googleAudit.reviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,

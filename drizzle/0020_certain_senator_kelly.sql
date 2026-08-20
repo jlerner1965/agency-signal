@@ -1,0 +1,1 @@
+ALTER TABLE `proposals` ADD `sections` text DEFAULT '' NOT NULL;

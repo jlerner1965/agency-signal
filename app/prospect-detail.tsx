@@ -5,6 +5,7 @@ import { buildGooglePresenceAudit } from "@/lib/google-presence";
 import { buildDigitalBlueprint } from "@/lib/digital-blueprint";
 import { offerCatalog } from "@/lib/sales";
 import AuditRunPanel from "./audit-run-panel";
+import ProposalSectionPicker, { type SectionOption } from "./proposal-sections";
 import type { AuditCheck, AuditComparison, AuditSummary, CompetitorAudit, Finding, Lead, Opportunity, Proposal } from "@/lib/types";
 
 type Props = {
@@ -64,6 +65,11 @@ export default function ProspectDetail(props: Props) {
   const [proposalDeliverables, setProposalDeliverables] = useState(suggestedOffer.deliverables.join("\n"));
   const blueprint = useMemo(() => buildDigitalBlueprint(lead, findings, googleAudit), [lead, findings, googleAudit]);
   const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([]);
+  // What this prospect can put in a proposal, and what the operator ticked.
+  // Null until the first answer arrives, which the builder reads as "every part
+  // this prospect can fill".
+  const [proposalParts, setProposalParts] = useState<{ options: SectionOption[]; chosen: string[] } | null>(null);
+  const [partsNote, setPartsNote] = useState("");
   const checkSummary = props.auditSummary?.checkSummary;
   const auditChecks = useMemo<AuditCheck[]>(() => {
     try { return JSON.parse(checkSummary || "[]"); } catch { return []; }
@@ -105,6 +111,30 @@ export default function ProspectDetail(props: Props) {
   }, [lead.score, lead.googleReviewedAt, opportunity?.primaryFinding]);
 
 
+  // Asked for when the tab is opened rather than on mount: it counts the
+  // concept pages already built for this prospect, and that answer changes when
+  // an audit run finishes while this panel is open.
+  useEffect(() => {
+    if (tab !== "proposal" || proposal) return;
+    let active = true;
+    fetch(`/api/leads/${lead.id}/proposal`)
+      .then((response) => (response.ok ? response.json() : { sections: [] }))
+      .then((payload: { sections?: SectionOption[] }) => {
+        if (!active) return;
+        const options = payload.sections ?? [];
+        setProposalParts((current) => ({
+          options,
+          // A choice already made is kept; only parts this prospect can still
+          // fill survive the refresh.
+          chosen: current
+            ? current.chosen.filter((id) => options.some((option) => option.id === id && option.available))
+            : options.filter((option) => option.available).map((option) => option.id),
+        }));
+      })
+      .catch(() => { if (active) setProposalParts({ options: [], chosen: [] }); });
+    return () => { active = false; };
+  }, [tab, proposal, lead.id]);
+
   const draftGoogleAudit = useMemo(() => buildGooglePresenceAudit({ ...lead, ...googleDraft, googleReviewedAt: lead.googleReviewedAt || new Date().toISOString() }), [lead, googleDraft]);
   const combinedScore = lead.score && googleAudit.reviewed ? Math.round(lead.score * .6 + googleAudit.score * .4) : lead.score || googleAudit.score || 0;
   const combinedFindings = [
@@ -119,7 +149,14 @@ export default function ProspectDetail(props: Props) {
     const benchmark = [...props.competitors].sort((a, b) => b.score - a.score)[0];
     setProposalTitle(`${lead.agencyName} Digital Presence Improvement Plan`);
     setProposalOutcome(`Improve the customer journey from discovery to contact by resolving ${items.length} evidence-backed website and Google presence priorities${benchmark ? ` and strengthening the website against the ${benchmark.name} benchmark` : ""}.`);
-    setProposalScope([benchmark && `${benchmark.name} provides a ${benchmark.score}/100 competitive benchmark compared with the current ${lead.score}/100 website score.`, ...items.map((item, index) => `${index + 1}. ${item.title}: ${item.action}`)].filter(Boolean).join("\n"));
+    // The argument, not the list. The actions are the deliverables, and writing
+    // them here as well printed all eight of them twice in the document — once
+    // as a run-on paragraph and again as the deliverables grid.
+    setProposalScope([
+      benchmark && `${benchmark.name} provides a ${benchmark.score}/100 competitive benchmark compared with the current ${lead.score}/100 website score.`,
+      `${items.length} ${items.length === 1 ? "priority was" : "priorities were"} selected from the audit: ${items.map((item) => item.title).join("; ")}.`,
+      "Each is listed below as a deliverable, with the change it calls for.",
+    ].filter(Boolean).join("\n"));
     setProposalDeliverables(items.map((item) => item.action).join("\n"));
     setProposalPrice(Math.max(2500, Math.round(items.reduce((sum, item) => sum + (item.effort === "Major" ? 1600 : item.effort === "Moderate" ? 900 : 450), 0) / 100) * 100));
     setProposalTimeline(items.some((item) => item.effort === "Major") ? "5–7 weeks" : "3–4 weeks");
@@ -131,9 +168,14 @@ export default function ProspectDetail(props: Props) {
     setOfferId(offer.id); setProposalPrice(offer.price); setProposalTimeline(offer.timeline); setProposalTitle(offer.name); setProposalOutcome(offer.outcome); setProposalDeliverables(offer.deliverables.join("\n"));
   }
   async function generateProposal() {
-    const response = await fetch(`/api/leads/${lead.id}/proposal`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ offerId, price: proposalPrice, timeline: proposalTimeline, title: proposalTitle, outcome: proposalOutcome, scope: proposalScope, deliverables: proposalDeliverables.split("\n").map((item) => item.trim()).filter(Boolean) }) });
+    setPartsNote("");
+    const response = await fetch(`/api/leads/${lead.id}/proposal`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ offerId, price: proposalPrice, timeline: proposalTimeline, title: proposalTitle, outcome: proposalOutcome, scope: proposalScope, deliverables: proposalDeliverables.split("\n").map((item) => item.trim()).filter(Boolean), sections: proposalParts?.chosen ?? null }) });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Unable to create proposal");
+    // A part that was asked for and could not be produced is said, not dropped
+    // quietly: the operator ticked the concepts and needs to know the document
+    // went out without them.
+    if (payload.note) setPartsNote(payload.note);
     props.onProposal(payload.proposal, payload.lead);
   }
   async function copyProposal() { if (proposal) await navigator.clipboard.writeText(`${window.location.origin}/proposal/${proposal.token}`); }
@@ -199,7 +241,7 @@ export default function ProspectDetail(props: Props) {
         <button className="generate-proposal" disabled={!blueprint.recommendations.length} onClick={useBlueprintInProposal}>Use {selectedRecommendations.length || Math.min(6, blueprint.recommendations.length)} priorities in proposal →</button>
       </section>}
 
-      {tab === "proposal" && <section className="simple-proposal-builder"><div className="audit-section-intro"><div><p className="eyebrow">Proposal development</p><h3>Turn the audit into a clear scope</h3><p>Edit every field before sharing. The client proposal includes the strongest website and Google findings.</p></div></div>{proposal ? <div className="existing-proposal"><span className="proposal-ready">{proposal.status}</span><h3>{proposal.title}</h3><p>${proposal.price.toLocaleString("en-US")} · {proposal.timeline} · {proposal.viewCount} view{proposal.viewCount === 1 ? "" : "s"}</p><div><button onClick={copyProposal}>Copy link</button><a href={`/proposal/${proposal.token}`} target="_blank" rel="noreferrer">Open / save PDF ↗</a></div><button className="refresh-proposal" onClick={props.onRefresh}>Refresh proposal status</button></div> : <><label>Proposal type<select value={offerId} onChange={(event) => selectOffer(event.target.value)}>{proposalOffers.map((offer) => <option key={offer.id} value={offer.id}>{offer.name}</option>)}</select></label><label>Proposal title<input value={proposalTitle} onChange={(event) => setProposalTitle(event.target.value)} /></label><label>Desired outcome<textarea rows={3} value={proposalOutcome} onChange={(event) => setProposalOutcome(event.target.value)} /></label><label>Audit-based scope<textarea rows={4} value={proposalScope} onChange={(event) => setProposalScope(event.target.value)} /></label><label>Deliverables <small>One per line</small><textarea rows={7} value={proposalDeliverables} onChange={(event) => setProposalDeliverables(event.target.value)} /></label><div className="proposal-money"><label>Investment<input type="number" min="500" step="100" value={proposalPrice} onChange={(event) => setProposalPrice(Number(event.target.value))} /></label><label>Timeline<input value={proposalTimeline} onChange={(event) => setProposalTimeline(event.target.value)} /></label></div><div className="proposal-proof"><strong>{selectedOffer.outcome}</strong><p>{selectedOffer.proof}</p></div><button className="generate-proposal" disabled={busy || (!lead.score && !googleAudit.reviewed) || !proposalTitle.trim() || !proposalDeliverables.trim()} onClick={() => generateProposal().catch((error) => alert(error.message))}>{lead.score || googleAudit.reviewed ? "Create trackable proposal" : "Complete an audit before proposing"}</button></>}</section>}
+      {tab === "proposal" && <section className="simple-proposal-builder"><div className="audit-section-intro"><div><p className="eyebrow">Proposal development</p><h3>Turn the audit into a clear scope</h3><p>Edit every field before sharing. The client proposal includes the strongest website and Google findings.</p></div></div>{proposal ? <div className="existing-proposal"><span className="proposal-ready">{proposal.status}</span><h3>{proposal.title}</h3><p>${proposal.price.toLocaleString("en-US")} · {proposal.timeline} · {proposal.viewCount} view{proposal.viewCount === 1 ? "" : "s"}</p><div><button onClick={copyProposal}>Copy link</button><a href={`/proposal/${proposal.token}`} target="_blank" rel="noreferrer">Open / save PDF ↗</a></div><button className="refresh-proposal" onClick={props.onRefresh}>Refresh proposal status</button></div> : <><label>Proposal type<select value={offerId} onChange={(event) => selectOffer(event.target.value)}>{proposalOffers.map((offer) => <option key={offer.id} value={offer.id}>{offer.name}</option>)}</select></label><label>Proposal title<input value={proposalTitle} onChange={(event) => setProposalTitle(event.target.value)} /></label><label>Desired outcome<textarea rows={3} value={proposalOutcome} onChange={(event) => setProposalOutcome(event.target.value)} /></label><label>Audit-based scope<textarea rows={4} value={proposalScope} onChange={(event) => setProposalScope(event.target.value)} /></label><label>Deliverables <small>One per line</small><textarea rows={7} value={proposalDeliverables} onChange={(event) => setProposalDeliverables(event.target.value)} /></label><div className="proposal-money"><label>Investment<input type="number" min="500" step="100" value={proposalPrice} onChange={(event) => setProposalPrice(Number(event.target.value))} /></label><label>Timeline<input value={proposalTimeline} onChange={(event) => setProposalTimeline(event.target.value)} /></label></div><div className="proposal-proof"><strong>{selectedOffer.outcome}</strong><p>{selectedOffer.proof}</p></div>{proposalParts && <ProposalSectionPicker options={proposalParts.options} chosen={proposalParts.chosen} disabled={busy} onChange={(ids) => setProposalParts({ options: proposalParts.options, chosen: ids })} />}{partsNote && <p className="form-error" role="status">{partsNote}</p>}<button className="generate-proposal" disabled={busy || (!lead.score && !googleAudit.reviewed) || !proposalTitle.trim() || !proposalDeliverables.trim()} onClick={() => generateProposal().catch((error) => alert(error.message))}>{lead.score || googleAudit.reviewed ? "Create trackable proposal" : "Complete an audit before proposing"}</button></>}</section>}
     </div>
   </aside>;
 }

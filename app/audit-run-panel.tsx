@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ProposalSectionPicker, { type SectionOption } from "./proposal-sections";
 
 type RunModule = {
   id: number; module: string; label: string; status: string; message: string;
@@ -30,7 +31,7 @@ type Diagnostics = {
 
 type Summary = { run: Run; modules: RunModule[]; findings: RunFinding[]; diagnostics: Diagnostics | null; pending: boolean; waitingFor: string | null; waitingReason: string };
 
-/** What the chosen findings would cost. Priced, not stored. */
+/** What the chosen findings would cost, and what they could be shown as. Priced, not stored. */
 type Preview = {
   scopeItems: Array<{ deliverable: string; label: string; criteria: string; rationale: string; quantity: number; display: string }>;
   priceDisplay: string;
@@ -38,6 +39,8 @@ type Preview = {
   retainer: { label: string; criteria: string; display: string } | null;
   chosenCount: number;
   totalCount: number;
+  sections: SectionOption[];
+  defaultSections: string[];
   message: string;
 };
 
@@ -69,10 +72,12 @@ type Deliverables = {
   proposal: { id: number; token: string; title: string; price: number; timeline: string; version: number; status: string; openingProse: string } | null;
   blockers: string[];
   mockups: Array<{ kind: string; title: string; url: string }>;
+  /** The parts the built document actually carries, as stored. */
+  sections: string[] | null;
 };
 
 export default function AuditRunPanel({ leadId, reportToken }: { leadId: number; reportToken: string }) {
-  const [deliverables, setDeliverables] = useState<Deliverables>({ recommendations: [], proposal: null, blockers: [], mockups: [] });
+  const [deliverables, setDeliverables] = useState<Deliverables>({ recommendations: [], proposal: null, blockers: [], mockups: [], sections: null });
   const [packaging, setPackaging] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [history, setHistory] = useState<Run[]>([]);
@@ -84,6 +89,10 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
   // Which findings go into the proposal. Held per run so opening a different
   // run does not inherit the last one's selection.
   const [selection, setSelection] = useState<{ runId: number; ids: number[] } | null>(null);
+  // Which parts of the document to build. Held per run for the same reason the
+  // findings are: opening a different run must not inherit the last one's
+  // answer to a question about a different site.
+  const [parts, setParts] = useState<{ runId: number; ids: string[] } | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   // The parts of a built proposal a person writes. Evidence is not among them.
   const [edits, setEdits] = useState<{ title: string; timeline: string; openingProse: string } | null>(null);
@@ -200,25 +209,34 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
    * opening referring to concept pages that did not exist yet, and on a
    * re-run it referred to the previous pass's pages, which this rebuild
    * replaces with fresh tokens.
+   *
+   * The concepts step runs only when the concepts were ticked. It is the
+   * slowest part of the build and the one that reads the prospect's site
+   * hardest, and a document that will not show them has no use for them.
    */
   async function buildPackage(runId: number) {
     setPackaging("Building recommendations…");
     setError("");
+    const wantsConcepts = includedParts === null || includedParts.includes("concepts");
     try {
       const recResponse = await fetch(`/api/audit-runs/${runId}/recommendations`, { method: "POST" });
       const recPayload = await recResponse.json();
       if (!recResponse.ok) throw new Error(recPayload.error || "Recommendations failed.");
 
-      setPackaging("Generating mockups…");
-      const mockupResponse = await fetch(`/api/audit-runs/${runId}/mockups`, { method: "POST" });
-      const mockupPayload = await mockupResponse.json();
-      if (!mockupResponse.ok) throw new Error(mockupPayload.error || "Mockups failed.");
+      let mockupPayload: { mockups?: Array<{ kind: string; title: string; url: string }>; error?: string } = {};
+      if (wantsConcepts) {
+        setPackaging("Generating mockups…");
+        const mockupResponse = await fetch(`/api/audit-runs/${runId}/mockups`, { method: "POST" });
+        mockupPayload = await mockupResponse.json();
+        if (!mockupResponse.ok) throw new Error(mockupPayload.error || "Mockups failed.");
+      }
 
       setPackaging("Drafting the proposal…");
       const proposalResponse = await fetch(`/api/audit-runs/${runId}/proposal`, {
         method: "POST", headers: { "content-type": "application/json" },
-        // The proposal is priced from the same selection the preview showed.
-        body: JSON.stringify({ findingIds: chosenIds }),
+        // The proposal is priced from the same selection the preview showed,
+        // and carries the parts that were ticked beside it.
+        body: JSON.stringify({ findingIds: chosenIds, sections: includedParts }),
       });
       const proposalPayload = await proposalResponse.json();
       if (!proposalResponse.ok) throw new Error(proposalPayload.error || "Proposal failed.");
@@ -229,6 +247,7 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
         proposal: built,
         blockers: proposalPayload.blockers ?? [],
         mockups: mockupPayload.mockups ?? [],
+        sections: proposalPayload.sections ?? null,
       });
       setEdits(built ? { title: built.title ?? "", timeline: built.timeline ?? "", openingProse: built.openingProse ?? "" } : null);
     } catch (reason) {
@@ -248,6 +267,15 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
   const chosenIds = selection && run && selection.runId === run.id ? selection.ids : allFindingIds;
   const chosenKey = chosenIds.join(",");
   const readyToPrice = Boolean(run && summary && !summary.pending && run.overallScore !== null);
+
+  // The parts on offer follow the finding selection, because a part is only
+  // offered when this run holds what fills it. Until the first preview lands
+  // there is nothing to have chosen, and null asks the build for every part it
+  // can fill — the same document the button produced before the picker.
+  const sectionOptions = preview?.sections ?? [];
+  const includedParts = preview
+    ? (parts && run && parts.runId === run.id ? parts.ids : preview.defaultSections)
+    : null;
 
   function toggleFinding(id: number) {
     if (!run) return;
@@ -442,9 +470,18 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
               <p>Recommendations map from the stored findings by rule; a recommendation that cannot cite one is refused rather than shipped. Nothing here is sent anywhere.</p>
             </div>
             <button className="primary-button" disabled={Boolean(packaging) || chosenIds.length === 0} onClick={() => buildPackage(run.id)}>
-              {packaging || "Build report, proposal and mockups"}
+              {packaging || (includedParts?.includes("concepts") === false
+                ? "Build report and proposal"
+                : "Build report, proposal and mockups")}
             </button>
           </div>
+
+          <ProposalSectionPicker
+            options={sectionOptions}
+            chosen={includedParts ?? []}
+            disabled={Boolean(packaging)}
+            onChange={(ids) => run && setParts({ runId: run.id, ids })}
+          />
 
           {preview && (
             <div className="engine-scope">
@@ -520,6 +557,20 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
                 <button className="primary-button" disabled={Boolean(saving)} onClick={saveEdits}>{saving || "Save"}</button>
               </div>
             </div>
+          )}
+
+          {deliverables.proposal && deliverables.sections && (
+            <p className="engine-built-parts" role="status">
+              {deliverables.sections.length
+                // Said back after the build, because a part that was ticked
+                // against evidence this run turned out not to have is dropped
+                // rather than refused, and the operator should not find that
+                // out by reading the document.
+                ? <>This proposal carries: {deliverables.sections
+                  .map((id) => sectionOptions.find((option) => option.id === id)?.label ?? id)
+                  .join(", ")}.</>
+                : "This proposal carries none of the optional parts — the scope, the price and the deliverables only."}
+            </p>
           )}
 
           <div className="engine-links">

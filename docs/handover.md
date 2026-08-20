@@ -94,6 +94,7 @@ Only a genuinely scored run may write the prospect's headline score.
 | Proposal opening voice, and the rules enforced against it | `config/voice.md`, `lib/audit/proposal-voice.js` |
 | Brand token extraction | `lib/audit/brand.js` |
 | Mockup templates | `lib/audit/mockup.js` |
+| Which parts a proposal can carry, and when each is offerable | `lib/audit/proposal-sections.js` |
 
 Weights are deliberately ordered: **Service coverage 0.30, Trust 0.25**, then
 Conversion 0.20, Visibility 0.15, Technical 0.10. A competent site-builder
@@ -114,6 +115,27 @@ category exceeds the cap.
   listing plus one about the category — not one per service. Per-service gaps
   are only emitted when Google lists services and a specific one is missing.
   Places `types` are Google's own taxonomy and do not count as a service list.
+
+## What a proposal carries
+
+The parts of the document are chosen before it is built, in **What goes in the
+proposal**, and stored on `proposals.sections`. Three rules hold the design
+together:
+
+- **A part is offered only when this run holds what fills it.**
+  `lib/audit/proposal-sections.js` decides nothing on its own; it is handed
+  counts — findings, service lines, priced lines, unverified checks, concept
+  pages — and reports what can be offered and, for the rest, why not. An
+  unavailable part stays on the list with its reason, because a missing option
+  reads as a part that cannot exist.
+- **Unticked is not built.** The concepts step is skipped entirely when the
+  concepts are not wanted, and a proposal built without them carries no mockup
+  links and no opening sentence offering to show one — the voice rules forbid
+  referring to a visual the reader cannot reach.
+- **An empty column means "everything".** Proposals built before the picker
+  existed carry no stored choice, and the document renders every part it has.
+  An empty array is a deliberate choice of none of the optional parts, and is
+  kept as one.
 
 ## The proposal opening
 

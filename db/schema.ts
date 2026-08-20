@@ -171,6 +171,10 @@ export const proposals = sqliteTable("proposals", {
   retainer: text("retainer").notNull().default(""),
   minimumApplied: integer("minimum_applied", { mode: "boolean" }).notNull().default(false),
   mockupLinks: text("mockup_links").notNull().default("[]"),
+  // Which parts of the document the operator chose before it was built. Empty
+  // on every proposal built before the picker existed, and those carried
+  // everything, so empty reads as "whatever it has" rather than as nothing.
+  sections: text("sections").notNull().default(""),
   pricingPlaceholder: integer("pricing_placeholder", { mode: "boolean" }).notNull().default(true),
   voicePlaceholder: integer("voice_placeholder", { mode: "boolean" }).notNull().default(true),
   approvedAt: text("approved_at"),
