@@ -150,9 +150,14 @@ export type Activity = {
 /**
  * The part of an opportunity a prospect may see. Everything omitted here is
  * internal sales reasoning — how the lead was ranked, the angle to lead with,
- * what to do next — and the report route sends this shape rather than the whole
- * object, which is how "Find or add a decision-maker email" reached a document
- * addressed to the decision-maker.
+ * what to do next — and the report route used to send this shape rather than
+ * the whole object, which is how "Find or add a decision-maker email" reached a
+ * document addressed to the decision-maker.
+ *
+ * The public brief no longer carries an opportunity at all: the section that
+ * rendered one belonged to the retired legacy body. Kept because the narrowing
+ * is the rule, and the next thing to send a prospect an opportunity should send
+ * this and not the whole object.
  */
 export type PublicOpportunity = Pick<
   Opportunity,
