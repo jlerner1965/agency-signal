@@ -24,3 +24,19 @@ test("does not fabricate an offer before an audit", () => {
   assert.equal(opportunity.nextAction, "Run website audit");
 });
 
+
+
+test("a finding with no URL does not take the report down", () => {
+  // affectedUrl is allowed to be empty and several analysers emit it that way.
+  // buildOpportunity runs inside the public report route, so parsing it
+  // unguarded meant one such finding blanked the page for the prospect.
+  const lead = { score: 48, email: "a@b.test", conversionScore: 40, visibilityScore: 50, technicalScore: 60, trustScore: 55, reportViews: 0 };
+  const findings = [{ category: "Conversion", severity: "High", title: "No way to make contact", evidence: "e", recommendation: "r", impact: "i", affectedUrl: "", sortOrder: 1 }];
+
+  const opportunity = buildOpportunity(lead, findings);
+  assert.match(opportunity.outreachAngle, /No way to make contact/);
+  assert.doesNotThrow(() => buildOpportunity(lead, findings));
+
+  // And a malformed one behaves the same way.
+  assert.doesNotThrow(() => buildOpportunity(lead, [{ ...findings[0], affectedUrl: "not a url" }]));
+});

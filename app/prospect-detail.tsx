@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
 import { buildDigitalBlueprint } from "@/lib/digital-blueprint";
 import { offerCatalog } from "@/lib/sales";
@@ -37,7 +37,7 @@ function seededScope(primaryFinding: string | undefined, googleFinding: string |
 
 export default function ProspectDetail(props: Props) {
   const { lead, findings, opportunity, proposal, pagesAudited, busy } = props;
-  const googleAudit = buildGooglePresenceAudit(lead);
+  const googleAudit = useMemo(() => buildGooglePresenceAudit(lead), [lead]);
   // "engine" was missing from this union while the tab was rendered, selected
   // and compared against — it worked at runtime and failed the typecheck three
   // times over, which is how a real break would have hidden.
@@ -62,20 +62,46 @@ export default function ProspectDetail(props: Props) {
   const [proposalOutcome, setProposalOutcome] = useState(suggestedOffer.outcome);
   const [proposalScope, setProposalScope] = useState(seededScope(opportunity?.primaryFinding, googleAudit.findings[0]?.title));
   const [proposalDeliverables, setProposalDeliverables] = useState(suggestedOffer.deliverables.join("\n"));
-  const blueprint = useMemo(() => buildDigitalBlueprint(lead, findings, googleAudit), [lead, findings, googleAudit.score, googleAudit.reviewed]);
+  const blueprint = useMemo(() => buildDigitalBlueprint(lead, findings, googleAudit), [lead, findings, googleAudit]);
   const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([]);
+  const checkSummary = props.auditSummary?.checkSummary;
   const auditChecks = useMemo<AuditCheck[]>(() => {
-    try { return JSON.parse(props.auditSummary?.checkSummary || "[]"); } catch { return []; }
-  }, [props.auditSummary?.checkSummary]);
+    try { return JSON.parse(checkSummary || "[]"); } catch { return []; }
+  }, [checkSummary]);
 
   // The panel is keyed by lead id in the dashboard, so a different lead
   // remounts it and the initialisers above are the reset. What still changes in
   // place is the audit, which loads after this mounts, and the draft is
   // re-seeded when it arrives.
+  // Only copy the operator has not touched is re-seeded. Replacing all of it
+  // meant saving the Google review, or an audit finishing in the background,
+  // silently discarded a half-written scope the operator was in the middle of.
+  const seeded = useRef({
+    offerId: suggestedOffer.id, price: suggestedOffer.price, timeline: suggestedOffer.timeline,
+    title: suggestedOffer.name, outcome: suggestedOffer.outcome,
+    deliverables: suggestedOffer.deliverables.join("\n"),
+    scope: seededScope(opportunity?.primaryFinding, googleAudit.findings[0]?.title),
+  });
   useEffect(() => {
     if (proposal) return;
-    selectOffer(suggestedOffer.id);
-    setProposalScope(seededScope(opportunity?.primaryFinding, googleAudit.findings[0]?.title));
+    const offer = suggestedOffer;
+    const next = {
+      offerId: offer.id, price: offer.price, timeline: offer.timeline,
+      title: offer.name, outcome: offer.outcome, deliverables: offer.deliverables.join("\n"),
+      scope: seededScope(opportunity?.primaryFinding, googleAudit.findings[0]?.title),
+    };
+    const prior = seeded.current;
+    // A field is only re-seeded while it still holds what we last seeded into
+    // it. Returning the current value is a no-op for React, so an untouched
+    // draft updates and an edited one is left exactly as the operator left it.
+    setOfferId((current) => (current === prior.offerId ? next.offerId : current));
+    setProposalPrice((current) => (current === prior.price ? next.price : current));
+    setProposalTimeline((current) => (current === prior.timeline ? next.timeline : current));
+    setProposalTitle((current) => (current === prior.title ? next.title : current));
+    setProposalOutcome((current) => (current === prior.outcome ? next.outcome : current));
+    setProposalDeliverables((current) => (current === prior.deliverables ? next.deliverables : current));
+    setProposalScope((current) => (current === prior.scope || !current.trim() ? next.scope : current));
+    seeded.current = next;
   }, [lead.score, lead.googleReviewedAt, opportunity?.primaryFinding]);
 
 

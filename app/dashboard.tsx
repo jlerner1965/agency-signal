@@ -42,6 +42,11 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
     } catch (error) { setDataMode("error"); setToast(error instanceof Error ? error.message : "Unable to load businesses"); }
   }
 
+  // Both loaders await a fetch before they set anything, so nothing here runs
+  // synchronously during the effect. The rule cannot see through the async
+  // boundary and flags the call itself; suppressed narrowly rather than by
+  // restructuring correct data loading around a false positive.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadLeads(); }, []);
   useEffect(() => {
     if (!toast) return;
@@ -77,6 +82,7 @@ export default function Dashboard({ ownerName }: { ownerName: string }) {
     setFindings(payload.findings ?? []); setOpportunity(payload.opportunity ?? null); setPagesAudited(payload.audit?.pagesAudited ?? 0); setAuditSummary(payload.audit ?? null); setAuditHistory(payload.auditHistory ?? []); setAuditComparison(payload.auditComparison ?? null); setCompetitors(payload.competitors ?? []); setProposal(payload.proposal ?? null);
   }
   function chooseLead(lead: Lead) { setSelectedId(lead.id); setFindings([]); setOpportunity(null); setPagesAudited(0); setAuditSummary(null); setAuditHistory([]); setAuditComparison(null); setCompetitors([]); setProposal(null); }
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (selectedId > 0) loadDetail(selectedId).catch(() => { setFindings([]); setOpportunity(null); setProposal(null); }); }, [selectedId]);
 
   async function patchLead(values: Record<string, unknown>, success: string) {
