@@ -1,10 +1,10 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import type { Finding, Opportunity, PublicReportLead } from "@/lib/types";
+import type { Finding, PublicOpportunity, PublicReportLead } from "@/lib/types";
 import EngineReport, { type EngineReport as EngineReportData } from "./engine-report";
 
-type ReportPayload = { lead: PublicReportLead; findings: Finding[]; opportunity: Opportunity; audit: { pagesAudited: number; confidenceScore: number; checksPassed: number; checksFailed: number; checksUnverified: number; screenshotKey: string; createdAt: string } | null; auditComparison: { scoreDelta: number; resolved: string[]; regressed: string[] } | null; competitors: Array<{ id: number; name: string; website: string; score: number; visibilityScore: number; conversionScore: number; technicalScore: number; trustScore: number; confidenceScore: number; pagesAudited: number; screenshotKey: string }>; engine: EngineReportData | null };
+type ReportPayload = { lead: PublicReportLead; findings: Finding[]; opportunity: PublicOpportunity; audit: { pagesAudited: number; confidenceScore: number; checksPassed: number; checksFailed: number; checksUnverified: number; screenshotKey: string; createdAt: string } | null; auditComparison: { scoreDelta: number; resolved: string[]; regressed: string[] } | null; competitors: Array<{ id: number; name: string; website: string; score: number; visibilityScore: number; conversionScore: number; technicalScore: number; trustScore: number; confidenceScore: number; pagesAudited: number; screenshotKey: string }>; engine: EngineReportData | null };
 
 export default function ReportView({ token, ownerName }: { token: string; ownerName: string }) {
   const ownerFirstName = ownerName.split(/\s+/)[0];

@@ -147,6 +147,18 @@ export type Activity = {
   createdAt: string;
 };
 
+/**
+ * The part of an opportunity a prospect may see. Everything omitted here is
+ * internal sales reasoning — how the lead was ranked, the angle to lead with,
+ * what to do next — and the report route sends this shape rather than the whole
+ * object, which is how "Find or add a decision-maker email" reached a document
+ * addressed to the decision-maker.
+ */
+export type PublicOpportunity = Pick<
+  Opportunity,
+  "primaryService" | "recommendedOffer" | "expectedOutcome" | "scope" | "primaryFinding"
+>;
+
 export type Opportunity = {
   priorityScore: number;
   priorityLabel: string;

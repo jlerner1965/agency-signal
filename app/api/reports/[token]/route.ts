@@ -3,8 +3,19 @@ import { getDb } from "@/db";
 import { audits, competitorAudits, leads, reportEvents } from "@/db/schema";
 import { getLeadByToken } from "@/lib/server-data";
 import { buildOpportunity } from "@/lib/opportunity";
+import type { Opportunity, PublicOpportunity } from "@/lib/types";
 import { compareAudits } from "@/lib/audit-history";
 import { reportPayload } from "@/lib/audit/deliverables";
+
+function publicOpportunity(opportunity: Opportunity): PublicOpportunity {
+  return {
+    primaryService: opportunity.primaryService,
+    recommendedOffer: opportunity.recommendedOffer,
+    expectedOutcome: opportunity.expectedOutcome,
+    scope: opportunity.scope,
+    primaryFinding: opportunity.primaryFinding,
+  };
+}
 
 export async function GET(
   _request: Request,
@@ -61,10 +72,14 @@ export async function GET(
       engine,
       auditComparison: compareAudits(auditHistory[0], auditHistory[1]),
       competitors: competitors.map((item) => ({ id: item.id, name: item.name, website: item.website, score: item.score, visibilityScore: item.visibilityScore, conversionScore: item.conversionScore, technicalScore: item.technicalScore, trustScore: item.trustScore, confidenceScore: item.confidenceScore, pagesAudited: item.pagesAudited, screenshotKey: item.screenshotKey })),
-      opportunity: buildOpportunity(lead, findings),
+      // Narrowed deliberately. buildOpportunity also carries how this lead was
+      // ranked, the angle to open with, and the next sales action — internal
+      // reasoning that has no business in a document addressed to the prospect,
+      // and which was reaching them in the payload whether or not it rendered.
+      opportunity: publicOpportunity(buildOpportunity(lead, findings)),
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load report";
-    return Response.json({ error: message }, { status: 500 });
+  } catch {
+    // Public endpoint: the reason stays in the logs, not in the response.
+    return Response.json({ error: "Unable to load report" }, { status: 500 });
   }
 }
