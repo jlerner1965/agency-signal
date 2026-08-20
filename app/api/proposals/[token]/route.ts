@@ -1,10 +1,11 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, auditFindings, auditRunModules, auditRuns, audits, competitorAudits, findings as engineFindings, leads, proposals } from "@/db/schema";
+import { activities, auditRunModules, auditRuns, competitorAudits, findings as engineFindings, leads, proposals } from "@/db/schema";
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
 import { serviceLinesFor } from "@/lib/audit/deliverables";
 import { carries, readSections } from "@/lib/audit/proposal-sections";
+import { summaryFromRun } from "@/lib/audit/run-summary";
 
 /** Stored JSON columns are parsed once here so no reader has to guess a shape. */
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
@@ -20,7 +21,13 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     if (!proposal) return Response.json({ error: "Proposal not found" }, { status: 404 });
     const [lead] = await db.select().from(leads).where(eq(leads.id, proposal.leadId)).limit(1);
     if (!lead) return Response.json({ error: "Proposal unavailable" }, { status: 404 });
-    const [audit] = await db.select().from(audits).where(eq(audits.leadId, lead.id)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
+    // A proposal built from the prospect rather than from a run still reports
+    // the newest finished run: the legacy `audits` table it used to read has
+    // had no writer since the old scoring path was removed, so those documents
+    // showed a score of nothing beside evidence of nothing.
+    const [latestRun] = proposal.runId ? [] : await db.select().from(auditRuns)
+      .where(and(eq(auditRuns.leadId, lead.id), isNotNull(auditRuns.finishedAt)))
+      .orderBy(desc(auditRuns.id)).limit(1);
     const googleAudit = buildGooglePresenceAudit(lead);
     const competitors = await db.select({ id: competitorAudits.id, name: competitorAudits.name, score: competitorAudits.score }).from(competitorAudits).where(eq(competitorAudits.leadId, lead.id)).orderBy(desc(competitorAudits.score)).limit(3);
 
@@ -32,25 +39,29 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     // omitted check reads as a pass, and the proposal was omitting all of them.
     const [run] = proposal.runId
       ? await db.select().from(auditRuns).where(eq(auditRuns.id, proposal.runId)).limit(1)
-      : [];
+      : [latestRun].filter(Boolean);
     const runModules = run
       ? await db.select().from(auditRunModules).where(eq(auditRunModules.runId, run.id)).orderBy(auditRunModules.sortOrder)
       : [];
+    const runSummary = summaryFromRun(run ?? null, runModules, null);
     const unmeasured = runModules
       .flatMap((module) => parseJson<Array<Record<string, unknown>>>(module.checkSummary, []))
       .filter((check) => check.status === "unverified")
       .map((check) => ({ label: String(check.label ?? ""), category: String(check.category ?? ""), evidence: String(check.evidence ?? "") }));
 
-    const findings = proposal.runId
+    const runFindings = run
       ? await db
         .select({ id: engineFindings.id, title: engineFindings.title, evidence: engineFindings.evidence, recommendation: engineFindings.recommendation, category: engineFindings.category, severity: engineFindings.severity, affectedUrl: engineFindings.affectedUrl })
         .from(engineFindings)
-        .where(eq(engineFindings.runId, proposal.runId))
+        .where(eq(engineFindings.runId, run.id))
         .orderBy(engineFindings.sortOrder)
-      : [
-        ...(audit ? await db.select({ title: auditFindings.title, evidence: auditFindings.evidence, recommendation: auditFindings.recommendation, category: auditFindings.category, severity: auditFindings.severity }).from(auditFindings).where(eq(auditFindings.auditId, audit.id)).orderBy(auditFindings.sortOrder).limit(2) : []),
-        ...googleAudit.findings.slice(0, 2),
-      ].slice(0, 4);
+      : [];
+    // A run-based proposal cites its own run in full. One built from the
+    // prospect leads with the strongest of each source, because it is a shorter
+    // document making a smaller claim.
+    const findings = proposal.runId
+      ? runFindings
+      : [...runFindings.slice(0, 2), ...googleAudit.findings.slice(0, 2)].slice(0, 4);
     await db.batch([
       db.update(proposals).set({ viewCount: sql`${proposals.viewCount} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(proposals.id, proposal.id)),
       db.update(leads).set({ status: proposal.status === "Accepted" ? "Won" : "Decision pending", updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(leads.id, lead.id)),
@@ -92,7 +103,19 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
         ? await serviceLinesFor(proposal.runId)
         : [],
       lead: { agencyName: lead.agencyName, contactName: lead.contactName, city: lead.city, state: lead.state },
-      audit: audit && audit.confidenceScore > 0 ? { score: audit.score, pagesAudited: audit.pagesAudited, confidenceScore: audit.confidenceScore, checksPassed: audit.checksPassed, checksFailed: audit.checksFailed, createdAt: audit.createdAt } : null,
+      // The run reports the checks and the confidence for both kinds of
+      // proposal now, so this older block has nothing left of its own to say.
+      // Passed and failed are counted from the checks themselves: "verified"
+      // means measured, which is passed plus failed, and reporting it as passed
+      // would claim every measured check came back clean.
+      audit: runSummary && runSummary.confidenceScore > 0 ? {
+        score: runSummary.score,
+        pagesAudited: runSummary.pagesAudited,
+        confidenceScore: runSummary.confidenceScore,
+        checksPassed: runSummary.checksPassed,
+        checksFailed: runSummary.checksFailed,
+        createdAt: runSummary.createdAt,
+      } : null,
       googleAudit: googleAudit.reviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,
       competitors,
       findings,

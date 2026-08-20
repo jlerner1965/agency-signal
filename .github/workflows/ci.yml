@@ -1,0 +1,50 @@
+# Runs the checks that were only ever run by hand.
+#
+# The suite has been green for a while, but nothing enforced it: a pull request
+# could change the engine, the pricing or the proposal and merge without a
+# single test running. These four steps are exactly what a contributor runs
+# locally, in the order that fails fastest.
+#
+# Install is plain `npm ci` rather than `npm run install:ci`. That helper exists
+# for the sandboxed environment the app is developed in — a redirected HOME, a
+# project-local cache, a bounded install — none of which a runner needs, and all
+# of which are extra ways for CI to fail for reasons that are not the code's.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A second push supersedes the first; there is nothing to learn from finishing
+# a run against a commit that is already history.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the engines floor in package.json.
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Also typechecks and validates the Worker artifact, via
+      # scripts/build-verified.sh.
+      - name: Build
+        run: npm run build
+
+      # `npm test` would build a second time; the build above already ran.
+      - name: Tests
+        run: node --test tests/*.test.mjs

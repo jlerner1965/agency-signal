@@ -1,12 +1,13 @@
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { getDb } from "@/db";
-import { activities, auditFindings, auditRuns, audits, leads, mockups, proposals } from "@/db/schema";
+import { activities, auditRuns, findings as engineFindings, leads, mockups, proposals } from "@/db/schema";
 import { buildOpportunity } from "@/lib/opportunity";
 import { offerCatalog, offerForOpportunity } from "@/lib/sales";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
 import { buildRunMockups } from "@/lib/audit/deliverables";
 import { normalizeSections, sectionOptions } from "@/lib/audit/proposal-sections";
+import { findingsFromRun } from "@/lib/audit/run-summary";
 
 function makeToken() { return crypto.randomUUID().replaceAll("-", ""); }
 function cleanText(value: unknown, fallback: string, maximum: number) {
@@ -70,13 +71,29 @@ async function leadSectionOptions(leadId: number, findingCount: number) {
   });
 }
 
+/**
+ * The findings a proposal built from this lead can show: the newest finished
+ * run's, in the older shape this path's document renders.
+ *
+ * It used to read the legacy `audits` table, which nothing has written since
+ * the old scoring path was removed — so a prospect with a complete audit run
+ * behind it offered no evidence at all.
+ */
+async function leadAuditFindings(leadId: number) {
+  const db = await getDb();
+  const [run] = await db.select().from(auditRuns)
+    .where(and(eq(auditRuns.leadId, leadId), isNotNull(auditRuns.finishedAt)))
+    .orderBy(desc(auditRuns.id)).limit(1);
+  if (!run) return [];
+  return findingsFromRun(await db.select().from(engineFindings)
+    .where(eq(engineFindings.runId, run.id))
+    .orderBy(engineFindings.sortOrder));
+}
+
 /** How many findings a proposal built from this lead would be able to show. */
 async function leadFindingCount(leadId: number) {
   const db = await getDb();
-  const [audit] = await db.select().from(audits).where(eq(audits.leadId, leadId)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
-  const stored = audit
-    ? await db.select({ id: auditFindings.id }).from(auditFindings).where(eq(auditFindings.auditId, audit.id))
-    : [];
+  const stored = await leadAuditFindings(leadId);
   const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
   const google = lead ? buildGooglePresenceAudit(lead).findings.length : 0;
   // The document shows the strongest of each, capped: offering the box is
@@ -109,8 +126,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const db = await getDb();
     const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
     if (!lead) return Response.json({ error: "Lead not found" }, { status: 404 });
-    const [audit] = await db.select().from(audits).where(eq(audits.leadId, leadId)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
-    const findings = audit ? await db.select().from(auditFindings).where(eq(auditFindings.auditId, audit.id)).orderBy(auditFindings.sortOrder) : [];
+    const findings = await leadAuditFindings(leadId);
     const opportunity = buildOpportunity(lead, findings);
     const googleAudit = buildGooglePresenceAudit(lead);
     const recommended = googleAudit.reviewed && googleAudit.score < 60 && lead.score < 65
