@@ -1,0 +1,1 @@
+ALTER TABLE `leads` ADD `google_services` text DEFAULT '' NOT NULL;

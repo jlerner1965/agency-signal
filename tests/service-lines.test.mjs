@@ -51,11 +51,13 @@ test("structured data contributes services a nav might miss", () => {
 
 test("a profile listing nothing is one finding, not one per service", () => {
   // Google flattens this clinic to one category. Saying that three times over
-  // would overstate it: there is one listing problem, not three.
-  const result = analyzeServiceLines(payloads({
-    primaryTypeDisplayName: { text: "Medical clinic" },
-    types: ["doctor", "health"],
-  }));
+  // would overstate it: there is one listing problem, not three. The claim
+  // needs somebody to have looked at the services section, which the API does
+  // not return.
+  const result = analyzeServiceLines(payloads(
+    { primaryTypeDisplayName: { text: "Medical clinic" }, types: ["doctor", "health"] },
+    { manual: { googleServicesReviewed: true, googleServices: "" } },
+  ));
 
   const listing = result.findings.filter((finding) => finding.title === "The Google profile lists no services at all");
   assert.equal(listing.length, 1);
@@ -69,6 +71,42 @@ test("a profile listing nothing is one finding, not one per service", () => {
   assert.match(category[0].evidence, /Medical clinic/);
 
   assert.deepEqual(result.serviceLines.map((line) => line.googleRepresented), [false, false, false]);
+});
+
+test("with nobody having checked, the profile is not accused of listing nothing", () => {
+  // The Places API does not return the services section for a profile we do not
+  // own, so an empty list means "not read", not "empty". Asserting the latter
+  // told a prospect their profile lists nothing on no evidence at all.
+  const result = analyzeServiceLines(payloads({
+    primaryTypeDisplayName: { text: "Medical clinic" },
+    types: ["doctor", "health"],
+  }));
+
+  assert.deepEqual(result.findings.filter((finding) => finding.title === "The Google profile lists no services at all"), []);
+
+  // The gap is listed rather than omitted, because an omitted check reads as a
+  // pass and this one was reading as a finding.
+  const listCheck = result.checks.find((check) => check.id === "google-service-list");
+  assert.equal(listCheck.status, "unverified");
+  assert.match(listCheck.evidence, /does not return the services section/);
+
+  // The category is a fact the profile publishes, so that finding still stands.
+  assert.equal(result.findings.filter((finding) => /^Categorised as/.test(finding.title)).length, 1);
+  // And the coverage evidence says what it actually compared against.
+  const coverage = result.checks.find((check) => check.id === "google-coverage");
+  assert.match(coverage.evidence, /the profile's category/);
+});
+
+test("an entered service list is compared like an API one", () => {
+  const result = analyzeServiceLines(payloads(
+    { primaryTypeDisplayName: { text: "Medical clinic" } },
+    { manual: { googleServicesReviewed: true, googleServices: "Hormone Therapy, Functional Medicine" } },
+  ));
+  const gaps = result.findings.filter((finding) => /is missing from the Google service list/.test(finding.title));
+  assert.equal(gaps.length, 1);
+  assert.match(gaps[0].title, /Medical Aesthetics/);
+  // Nothing is unmeasured once a person has entered what the profile lists.
+  assert.equal(result.checks.find((check) => check.id === "google-service-list"), undefined);
 });
 
 test("when Google does list services, a missing one is its own finding", () => {
