@@ -1,6 +1,7 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activities, auditFindings, audits, competitorAudits, findings as engineFindings, leads, proposals } from "@/db/schema";
+import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
 
 /** Stored JSON columns are parsed once here so no reader has to guess a shape. */
@@ -80,5 +81,54 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     return Response.json({ ok: true, status: "Accepted" });
   } catch {
     return Response.json({ error: "Unable to accept proposal" }, { status: 500 });
+  }
+}
+
+/**
+ * Edit the parts of a proposal a person writes.
+ *
+ * The split is the point. Prose, the timeline and the title are judgment and
+ * belong to whoever is selling; the evidence, its quotes, the URLs it cites and
+ * every per-unit figure come from the audit and the pricing file, and are not
+ * editable here at any price. A document that lets you retype the evidence is
+ * no longer evidence.
+ */
+const EDITABLE = ["openingProse", "timeline", "title"] as const;
+
+export async function PATCH(request: Request, context: { params: Promise<{ token: string }> }) {
+  const denied = await requireDashboardApi();
+  if (denied) return denied;
+  try {
+    const { token } = await context.params;
+    const body = (await request.json()) as Partial<Record<(typeof EDITABLE)[number], unknown>>;
+
+    const patch: Record<string, string> = {};
+    if (typeof body.openingProse === "string") patch.openingProse = body.openingProse.slice(0, 4_000);
+    if (typeof body.timeline === "string") patch.timeline = body.timeline.replace(/\s+/g, " ").trim().slice(0, 100);
+    if (typeof body.title === "string") {
+      const title = body.title.replace(/\s+/g, " ").trim().slice(0, 160);
+      // The title heads the document, so an empty one is a mistake, not a clear.
+      if (!title) return Response.json({ error: "A proposal needs a title." }, { status: 400 });
+      patch.title = title;
+    }
+    if (!Object.keys(patch).length) {
+      return Response.json({ error: `Nothing to change. Editable fields: ${EDITABLE.join(", ")}.` }, { status: 400 });
+    }
+
+    const db = await getDb();
+    const [proposal] = await db.select().from(proposals).where(eq(proposals.token, token)).limit(1);
+    if (!proposal) return Response.json({ error: "Proposal not found" }, { status: 404 });
+    // An accepted proposal is a record of what was agreed, not a draft.
+    if (proposal.status === "Accepted") {
+      return Response.json({ error: "This proposal has been accepted and can no longer be edited." }, { status: 409 });
+    }
+
+    const [updated] = await db.update(proposals)
+      .set({ ...patch, updatedAt: sql`CURRENT_TIMESTAMP` })
+      .where(eq(proposals.id, proposal.id))
+      .returning();
+    return Response.json({ proposal: { token: updated.token, title: updated.title, timeline: updated.timeline, openingProse: updated.openingProse } });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Unable to update the proposal." }, { status: 500 });
   }
 }

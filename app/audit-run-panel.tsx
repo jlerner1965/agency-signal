@@ -66,7 +66,7 @@ const MODULE_TONE: Record<string, string> = {
 
 type Deliverables = {
   recommendations: Array<{ id: number; label: string; rationale: string; rationaleSource: string; findingIds: string }>;
-  proposal: { id: number; token: string; title: string; price: number; timeline: string; version: number; status: string } | null;
+  proposal: { id: number; token: string; title: string; price: number; timeline: string; version: number; status: string; openingProse: string } | null;
   blockers: string[];
   mockups: Array<{ kind: string; title: string; url: string }>;
 };
@@ -85,6 +85,9 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
   // run does not inherit the last one's selection.
   const [selection, setSelection] = useState<{ runId: number; ids: number[] } | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  // The parts of a built proposal a person writes. Evidence is not among them.
+  const [edits, setEdits] = useState<{ title: string; timeline: string; openingProse: string } | null>(null);
+  const [saving, setSaving] = useState("");
   const [waitNotice, setWaitNotice] = useState("");
   const cancelled = useRef(false);
 
@@ -153,6 +156,28 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
     }
   }
 
+  async function saveEdits() {
+    const proposal = deliverables.proposal;
+    if (!proposal || !edits) return;
+    setSaving("Saving…"); setError("");
+    try {
+      const response = await fetch(`/api/proposals/${encodeURIComponent(proposal.token)}`, {
+        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(edits),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to save.");
+      setDeliverables((current) => ({
+        ...current,
+        proposal: current.proposal ? { ...current.proposal, ...payload.proposal } : current.proposal,
+      }));
+      setSaving("Saved");
+      window.setTimeout(() => setSaving(""), 1600);
+    } catch (reason) {
+      setSaving("");
+      setError(reason instanceof Error ? reason.message : "Unable to save.");
+    }
+  }
+
   async function openRun(runId: number) {
     setBusy(true); setError("");
     try {
@@ -198,12 +223,14 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
       const proposalPayload = await proposalResponse.json();
       if (!proposalResponse.ok) throw new Error(proposalPayload.error || "Proposal failed.");
 
+      const built = proposalPayload.proposal ?? null;
       setDeliverables({
         recommendations: recPayload.recommendations ?? [],
-        proposal: proposalPayload.proposal ?? null,
+        proposal: built,
         blockers: proposalPayload.blockers ?? [],
         mockups: mockupPayload.mockups ?? [],
       });
+      setEdits(built ? { title: built.title ?? "", timeline: built.timeline ?? "", openingProse: built.openingProse ?? "" } : null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The package could not be built.");
     } finally {
@@ -464,6 +491,34 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
                   <small>Cites findings {JSON.parse(rec.findingIds || "[]").map((id: number) => `F${id}`).join(", ")}</small>
                 </article>
               ))}
+            </div>
+          )}
+
+          {deliverables.proposal && edits && (
+            <div className="engine-editor">
+              <div className="engine-editor-head">
+                <p className="eyebrow">Your words</p>
+                <p>Everything else in the document — the evidence, the sentences quoted from their site, and every figure — comes from the audit and the pricing file, and is not editable here.</p>
+              </div>
+              <label>
+                Title
+                <input value={edits.title} onChange={(event) => setEdits({ ...edits, title: event.target.value })} />
+              </label>
+              <label>
+                Timeline
+                <input
+                  value={edits.timeline}
+                  placeholder="Left out of the document while empty"
+                  onChange={(event) => setEdits({ ...edits, timeline: event.target.value })}
+                />
+              </label>
+              <label>
+                Opening
+                <textarea rows={6} value={edits.openingProse} onChange={(event) => setEdits({ ...edits, openingProse: event.target.value })} />
+              </label>
+              <div className="engine-editor-actions">
+                <button className="primary-button" disabled={Boolean(saving)} onClick={saveEdits}>{saving || "Save"}</button>
+              </div>
             </div>
           )}
 

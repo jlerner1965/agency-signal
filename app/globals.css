@@ -647,6 +647,13 @@ td { height: 70px; font-size: 12px; }
 .engine-scope li b { color: #355d4c; font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .engine-scope-empty { margin: 0; color: #86601a; font-size: 10px; }
 .engine-scope-note { margin: 0; color: #6f7b8b; font-size: 9px; }
+.proposal-locked { max-width: 62ch; margin: 10px 0 0; font-size: 12px; line-height: 1.6; opacity: .72; }
+.engine-editor { margin-top: 12px; padding: 20px; border: 1px solid #dfe5e9; border-radius: 8px; background: white; display: grid; gap: 12px; }
+.engine-editor-head p:last-child { margin: 6px 0 0; color: #6f7b8b; font-size: 9px; line-height: 1.55; max-width: 62ch; }
+.engine-editor label { display: grid; gap: 5px; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #46525f; }
+.engine-editor input, .engine-editor textarea { font: inherit; font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; color: #1b2124; padding: 9px 10px; border: 1px solid #d5dde3; border-radius: 6px; }
+.engine-editor textarea { line-height: 1.6; resize: vertical; }
+.engine-editor-actions { display: flex; justify-content: flex-end; }
 .engine-waiting { margin: 0; padding: 10px 14px; border-radius: 7px; background: #fdf6e6; color: #86601a; font-size: 9px; line-height: 1.55; }
 .engine-warning { margin: 0; padding: 12px 14px; border-radius: 7px; background: #fdf0ee; color: #93372f; font-size: 9px; line-height: 1.55; }
 
