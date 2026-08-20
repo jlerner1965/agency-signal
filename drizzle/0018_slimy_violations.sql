@@ -1,0 +1,1 @@
+ALTER TABLE `audit_runs` ADD `fresh_crawl` integer DEFAULT false NOT NULL;

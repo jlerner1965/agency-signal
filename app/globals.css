@@ -626,6 +626,10 @@ td { height: 70px; font-size: 12px; }
 .engine-cost b { color: #40505f; font-size: 13px; font-variant-numeric: tabular-nums; }
 .engine-score small, .engine-cost small { color: #84909d; font-size: 8px; }
 .engine-subdetail { color: #9aa5b1; }
+.engine-start { display: grid; gap: 7px; justify-items: end; }
+.engine-fresh { display: flex; align-items: center; gap: 7px; color: #46525f; font-size: 10px; font-weight: 700; cursor: pointer; }
+.engine-fresh input { margin: 0; cursor: pointer; }
+.engine-start small { max-width: 260px; color: #7d8894; font-size: 9px; line-height: 1.5; text-align: right; }
 .engine-waiting { margin: 0; padding: 10px 14px; border-radius: 7px; background: #fdf6e6; color: #86601a; font-size: 9px; line-height: 1.55; }
 .engine-warning { margin: 0; padding: 12px 14px; border-radius: 7px; background: #fdf0ee; color: #93372f; font-size: 9px; line-height: 1.55; }
 

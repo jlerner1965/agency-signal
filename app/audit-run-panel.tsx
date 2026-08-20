@@ -66,6 +66,9 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
   const [summary, setSummary] = useState<Summary | null>(null);
   const [history, setHistory] = useState<Run[]>([]);
   const [busy, setBusy] = useState(false);
+  // Off by default: re-reading a source costs a paid Places call and another
+  // crawl of the prospect's site, so it is asked for rather than assumed.
+  const [fresh, setFresh] = useState(false);
   const [error, setError] = useState("");
   const [waitNotice, setWaitNotice] = useState("");
   const cancelled = useRef(false);
@@ -121,7 +124,7 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
     try {
       const response = await fetch("/api/audit-runs", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ leadId }),
+        body: JSON.stringify({ leadId, fresh }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to start the audit run.");
@@ -208,9 +211,16 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
           <h3>Run the module set</h3>
           <p>Each module runs as its own step and stores what it fetched. A run resumes where it stopped, and a site that could not be read is reported as unread rather than scored.</p>
         </div>
-        <button className="primary-button" disabled={busy} onClick={startRun}>
-          {busy ? "Running…" : "Start audit run"}
-        </button>
+        <div className="engine-start">
+          <button className="primary-button" disabled={busy} onClick={startRun}>
+            {busy ? "Running…" : "Start audit run"}
+          </button>
+          <label className="engine-fresh">
+            <input type="checkbox" checked={fresh} disabled={busy} onChange={(event) => setFresh(event.target.checked)} />
+            <span>Fetch the sources again</span>
+          </label>
+          <small>Off, a run reuses what was already fetched today. On, it reads the site and the profile again — slower, and it spends the paid Places call.</small>
+        </div>
       </div>
 
       {error && <p className="form-error" role="alert">{error}</p>}

@@ -202,6 +202,13 @@ export const auditRuns = sqliteTable("audit_runs", {
   checksTotal: integer("checks_total").notNull().default(0),
   costCents: integer("cost_cents").notNull().default(0),
   reviewStatus: text("review_status").notNull().default("Unreviewed"),
+  /**
+   * Ignore what earlier runs fetched today and read the sources again. Scoped
+   * to this run rather than switching the cache off, so the crawl is still
+   * shared between the modules that need it and the prospect's site is fetched
+   * once, not once per module.
+   */
+  freshCrawl: integer("fresh_crawl", { mode: "boolean" }).notNull().default(false),
   error: text("error").notNull().default(""),
   startedAt: text("started_at"),
   finishedAt: text("finished_at"),
