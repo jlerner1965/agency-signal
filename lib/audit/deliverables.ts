@@ -431,6 +431,18 @@ export async function buildRunMockups(runId: number) {
   return db.select().from(mockups).where(eq(mockups.runId, runId));
 }
 
+/**
+ * The mockup without counting a view. The proposal embeds the concept pages, so
+ * counting those would make the view count mean "the proposal was opened"
+ * rather than "someone went and looked at the concept", which is the only
+ * reason to record it.
+ */
+export async function readMockup(token: string) {
+  const db = await getDb();
+  const [mockup] = await db.select().from(mockups).where(eq(mockups.token, token)).limit(1);
+  return mockup ?? null;
+}
+
 export async function recordMockupView(token: string) {
   const db = await getDb();
   const [mockup] = await db.select().from(mockups).where(eq(mockups.token, token)).limit(1);

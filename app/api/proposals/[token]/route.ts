@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { activities, auditFindings, audits, competitorAudits, findings as engineFindings, leads, proposals } from "@/db/schema";
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
+import { serviceLinesFor } from "@/lib/audit/deliverables";
 
 /** Stored JSON columns are parsed once here so no reader has to guess a shape. */
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
@@ -50,6 +51,10 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
         mockupLinks: parseJson<unknown[]>(proposal.mockupLinks, []),
         retainer: parseJson<unknown>(proposal.retainer, null),
       },
+      // The gap between what the site sells and what Google carries is the
+      // argument this document is making, so it belongs in the document rather
+      // than in a separate report the reader has to be sent to.
+      serviceLines: proposal.runId ? await serviceLinesFor(proposal.runId) : [],
       lead: { agencyName: lead.agencyName, contactName: lead.contactName, city: lead.city, state: lead.state },
       audit: audit && audit.confidenceScore > 0 ? { score: audit.score, pagesAudited: audit.pagesAudited, confidenceScore: audit.confidenceScore, checksPassed: audit.checksPassed, checksFailed: audit.checksFailed, createdAt: audit.createdAt } : null,
       googleAudit: googleAudit.reviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,
