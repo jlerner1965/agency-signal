@@ -257,3 +257,25 @@ test("a section with nothing to quote says so instead of inventing copy", () => 
   assert.match(html, /No description was found/);
   assert.doesNotMatch(html, /Aragonite raises alkalinity/);
 });
+
+test("a hostile stylesheet cannot break out of the mockup's own style block", () => {
+  // The prospect's site controls this text, and the mockup is served through
+  // srcDoc. A font-family that closes the style block used to run script on our
+  // origin, so the audit of a hostile site attacked whoever opened the concept.
+  const hostile = `<style>body{font-family: Arial</style><script>alert(document.domain)</script>}</style>`;
+  const brand = extractBrandTokens(hostile, "https://hostile.test/", "Hostile");
+  assert.ok(!/[<>]/.test(brand.fontStack), `font stack still carries markup: ${brand.fontStack}`);
+
+  const html = buildHomepageMockup(brand, [{ name: "Line", key: "line" }], { register: "service" });
+  assert.ok(!/<script/i.test(html), "no script reached the page");
+  // One style block, opened and closed exactly once.
+  assert.equal((html.match(/<\/style>/gi) ?? []).length, 1);
+});
+
+test("a real font stack still survives sanitising", () => {
+  const brand = extractBrandTokens(
+    `<style>body{font-family: "Helvetica Neue", Helvetica, Arial, sans-serif}</style>`,
+    "https://ok.test/", "OK",
+  );
+  assert.equal(brand.fontStack, "Helvetica Neue, Helvetica, Arial, sans-serif");
+});

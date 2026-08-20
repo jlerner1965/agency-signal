@@ -6,6 +6,15 @@ type Finding = {
   priority: number; affectedUrl: string; sortOrder: number;
 };
 
+/**
+ * The path, for a link the reader can recognise. A stored URL that will not
+ * parse is not worth taking the whole document down for, so it prints as it
+ * was stored.
+ */
+function pathOf(url: string) {
+  try { return new URL(url).pathname; } catch { return url; }
+}
+
 type ServiceLine = {
   name: string; siteUrl: string; quote: string; sources: string[];
   hasLandingPage: boolean; googleRepresented: boolean | null;
@@ -85,7 +94,7 @@ export default function EngineReport({ report, businessName }: { report: EngineR
                     <tr key={line.name} className={line.googleRepresented === false ? "gap" : ""}>
                       <td><strong>{line.name}</strong></td>
                       <td>
-                        <a href={line.siteUrl} target="_blank" rel="noreferrer">{new URL(line.siteUrl).pathname}</a>
+                        <a href={line.siteUrl} target="_blank" rel="noreferrer">{pathOf(line.siteUrl)}</a>
                         <small>&ldquo;{line.quote}&rdquo;</small>
                       </td>
                       <td>{line.hasLandingPage ? <span className="yes">Yes</span> : <span className="no">No page</span>}</td>

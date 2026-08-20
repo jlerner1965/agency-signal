@@ -42,10 +42,25 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
       db.insert(activities).values({ leadId: lead.id, activityType: "proposal_viewed", description: `${proposal.title} proposal viewed` }),
     ]);
     return Response.json({
-      // Spread first, then the derived fields, or the raw row overwrites them.
+      // Named field by field rather than spread. This endpoint is public to
+      // anyone holding the link, and the row also carries who signed it, their
+      // email, and the internal ids — none of which the document needs.
       proposal: {
-        ...proposal,
-        viewCount: proposal.viewCount + 1,
+        title: proposal.title,
+        service: proposal.service,
+        outcome: proposal.outcome,
+        scope: proposal.scope,
+        price: proposal.price,
+        priceDisplay: proposal.priceDisplay,
+        timeline: proposal.timeline,
+        status: proposal.status,
+        expiresAt: proposal.expiresAt,
+        acceptedAt: proposal.acceptedAt,
+        openingProse: proposal.openingProse,
+        openingBlocked: proposal.openingBlocked,
+        minimumApplied: proposal.minimumApplied,
+        pricingPlaceholder: proposal.pricingPlaceholder,
+        voicePlaceholder: proposal.voicePlaceholder,
         deliverables: parseJson<string[]>(proposal.deliverables, []),
         scopeItems: parseJson<unknown[]>(proposal.scopeItems, []),
         mockupLinks: parseJson<unknown[]>(proposal.mockupLinks, []),

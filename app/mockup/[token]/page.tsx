@@ -30,9 +30,13 @@ export default async function MockupPage({
     </main>;
   }
 
+  // Sandboxed to an opaque origin. The markup is built from a prospect's own
+  // site, and srcDoc would otherwise run it on ours; the concept pages carry no
+  // script of their own, so nothing here needs the privileges this withholds.
   return <iframe
     title={mockup.title}
     srcDoc={mockup.html}
+    sandbox=""
     style={{ position: "fixed", inset: 0, width: "100%", height: "100%", border: 0 }}
   />;
 }
