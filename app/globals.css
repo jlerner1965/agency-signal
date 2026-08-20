@@ -831,3 +831,35 @@ td { height: 70px; font-size: 12px; }
 .proposal-visuals { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .proposal-visuals .eyebrow { width: 100%; margin: 0 0 2px; }
 .proposal-visuals a { padding: 10px 15px; border: 1px solid #2b7257; border-radius: 7px; color: #2b7257; text-decoration: none; font-size: 11px; font-weight: 700; }
+
+/* The parts picker. It sits in two places — the audit engine panel and the
+   simple proposal builder — so it carries its own frame rather than inheriting
+   whichever one it happens to be in. */
+.proposal-parts { margin-top: 14px; padding: 16px 18px; border: 1px solid #dfe5e9; border-radius: 8px; background: white; display: grid; gap: 12px; }
+.proposal-parts-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.proposal-parts-head .eyebrow { margin: 0; }
+.proposal-parts-head small { display: block; margin-top: 4px; color: #6f7b8b; font-size: 9.5px; line-height: 1.5; }
+.proposal-parts-head button { padding: 6px 11px; border: 1px solid #d3dbe2; border-radius: 6px; background: white; color: #46525f; font-size: 9px; font-weight: 750; white-space: nowrap; cursor: pointer; }
+.proposal-parts-head button:disabled { opacity: .5; cursor: default; }
+.proposal-parts ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.proposal-parts li { padding: 11px 13px; border: 1px solid #e6ebef; border-radius: 7px; background: #fbfcfd; }
+.proposal-parts li.unavailable { opacity: .55; }
+.proposal-parts label { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.proposal-parts li.unavailable label { cursor: default; }
+.proposal-parts input { margin: 2px 0 0; cursor: pointer; }
+.proposal-parts input:disabled { cursor: default; }
+.proposal-parts strong { display: block; color: #2c3a49; font-size: 11px; }
+.proposal-parts small { display: block; margin-top: 3px; color: #6f7b8b; font-size: 9px; line-height: 1.5; }
+.proposal-parts em { display: block; margin-top: 5px; color: #55708a; font-size: 9px; font-style: normal; line-height: 1.5; }
+.proposal-parts li.unavailable em { color: #86601a; }
+@media (max-width: 700px) { .proposal-parts ul { grid-template-columns: 1fr; } }
+
+/* A scope written as several lines reads as several lines. Collapsed into one
+   paragraph, eight priorities became a single unreadable block. */
+/* The reset clears list markers, and an ordered list with no numbers on it is
+   not an ordered list. */
+.proposal-scope-prose { margin: 0 0 14px; padding-left: 22px; display: grid; gap: 8px; list-style: decimal; }
+.proposal-scope-prose li { color: #657184; font-size: 12px; line-height: 1.7; }
+.proposal-scope-prose li::marker { color: #94a1b0; font-size: 11px; font-weight: 750; }
+.proposal-scope-prose li strong { color: #2c3a49; }
+.engine-built-parts { margin: 12px 0 0; color: #46525f; font-size: 10px; line-height: 1.55; }

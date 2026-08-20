@@ -27,9 +27,31 @@ evidence, and is weighted accordingly.
    same site reuses them. Tick **Fetch the sources again** to ignore what
    earlier runs read today — the run still shares one crawl across its own
    modules, so the prospect's site is fetched once, not once per module.
-4. When it finishes, **Build report, proposal and mockups** produces the package.
+4. When it finishes, tick the findings the proposal should argue from and the
+   parts the document should carry, then press **Build report, proposal and
+   mockups**.
 
 Every artifact is a draft. Nothing in this system sends anything to a prospect.
+
+### Choosing what goes in the proposal
+
+**What goes in the proposal** lists the parts a document can carry — the
+opening, the audit evidence, the service-line coverage table, the website
+mockups, the priced scope, and the checks that could not be run — with what each
+would contain for this prospect beside it. Ticked parts are built and included;
+unticked ones are not built at all, so leaving the mockups out skips the slowest
+step of the build rather than producing pages nobody will see.
+
+A part this prospect has nothing to fill stays on the list, greyed, with the
+reason: a missing option reads as a part the tool cannot produce, which is a
+different claim from one this run has nothing to put in it. The choice is stored
+with the proposal, so the public document shows exactly the parts that were
+ticked.
+
+The same picker appears on the **Proposal** tab for a proposal built from the
+prospect rather than from a run. Three of the parts are the run's to produce and
+say so; the concept mockups are not, and can be included there from the newest
+finished run.
 
 Pricing is deliverable-based. The audit decides which deliverables are triggered
 and which severity band each falls in; no figure reaches a proposal that is not
