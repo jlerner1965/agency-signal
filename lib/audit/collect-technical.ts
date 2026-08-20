@@ -119,7 +119,9 @@ export async function collectTechnical(context: CollectContext, keys: Record<str
       retryAfterSeconds: document.ok ? 0 : document.retryAfter,
       failureReason: document.ok ? "" : document.reason,
       payload: document.ok
-        ? { status: document.status, finalUrl: document.finalUrl, server: document.server, redirected: document.redirected, html: document.html }
+        // The address we asked for, kept beside the one we landed on: a redirect
+        // only means something when you can see what it changed.
+        ? { status: document.status, requestedUrl: target, finalUrl: document.finalUrl, server: document.server, redirected: document.redirected, html: document.html }
         : { status: document.status, finalUrl: document.finalUrl, server: document.server },
     });
   }
