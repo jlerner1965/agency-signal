@@ -1,6 +1,6 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, auditFindings, audits, competitorAudits, findings as engineFindings, leads, proposals } from "@/db/schema";
+import { activities, auditFindings, auditRunModules, auditRuns, audits, competitorAudits, findings as engineFindings, leads, proposals } from "@/db/schema";
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildGooglePresenceAudit } from "@/lib/google-presence";
 import { serviceLinesFor } from "@/lib/audit/deliverables";
@@ -26,6 +26,20 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     // A proposal built from an audit run cites that run's findings. Reading the
     // legacy audit instead showed a run-based proposal either nothing or a
     // different pass's evidence, which is the one thing this document cannot do.
+    // The run behind this proposal, so the document carries the same score and
+    // the same list of what could not be measured as the report does. An
+    // omitted check reads as a pass, and the proposal was omitting all of them.
+    const [run] = proposal.runId
+      ? await db.select().from(auditRuns).where(eq(auditRuns.id, proposal.runId)).limit(1)
+      : [];
+    const runModules = run
+      ? await db.select().from(auditRunModules).where(eq(auditRunModules.runId, run.id)).orderBy(auditRunModules.sortOrder)
+      : [];
+    const unmeasured = runModules
+      .flatMap((module) => parseJson<Array<Record<string, unknown>>>(module.checkSummary, []))
+      .filter((check) => check.status === "unverified")
+      .map((check) => ({ label: String(check.label ?? ""), category: String(check.category ?? ""), evidence: String(check.evidence ?? "") }));
+
     const findings = proposal.runId
       ? await db
         .select({ id: engineFindings.id, title: engineFindings.title, evidence: engineFindings.evidence, recommendation: engineFindings.recommendation, category: engineFindings.category, severity: engineFindings.severity, affectedUrl: engineFindings.affectedUrl })
@@ -75,6 +89,20 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
       googleAudit: googleAudit.reviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,
       competitors,
       findings,
+      // Null for a proposal that predates the engine, which the view treats as
+      // "no run to report" rather than a zero.
+      run: run && run.finishedAt ? {
+        score: run.overallScore,
+        confidence: run.confidence,
+        checksVerified: run.checksVerified,
+        checksTotal: run.checksTotal,
+        reachable: run.reachable,
+        subscores: {
+          Trust: run.trustScore, Conversion: run.conversionScore,
+          Visibility: run.visibilityScore, Technical: run.technicalScore,
+        },
+      } : null,
+      unmeasured,
     });
   } catch {
     return Response.json({ error: "Proposal unavailable" }, { status: 500 });
