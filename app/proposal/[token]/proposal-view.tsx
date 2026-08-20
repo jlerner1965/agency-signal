@@ -55,6 +55,12 @@ type Payload = {
   audit: { score: number; pagesAudited: number; confidenceScore: number; checksPassed: number; checksFailed: number; createdAt: string } | null;
   googleAudit: { score: number; reviewedAt: string | null } | null;
   competitors: Array<{ id: number; name: string; score: number }>;
+  run: {
+    score: number | null; confidence: number;
+    checksVerified: number; checksTotal: number; reachable: boolean;
+    subscores: { Trust: number; Conversion: number; Visibility: number; Technical: number };
+  } | null;
+  unmeasured: Array<{ label: string; category: string; evidence: string }>;
   findings: { title: string; evidence: string; recommendation: string; category: string; severity: string }[];
 };
 
@@ -89,7 +95,7 @@ export default function ProposalView({ token, ownerName }: { token: string; owne
   if (error && !payload) return <main className="proposal-state"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><section><p className="eyebrow">Proposal</p><h1>This proposal is unavailable.</h1><p>{error}</p></section></main>;
   if (!payload) return <main className="proposal-state"><div className="brand-lockup"><span className="brand-mark">A</span><span>AgencySignal</span></div><section><span className="report-loader" /><p>Loading proposal…</p></section></main>;
 
-  const { proposal, lead, audit, googleAudit, findings, competitors, serviceLines } = payload;
+  const { proposal, lead, audit, googleAudit, findings, competitors, serviceLines, run, unmeasured } = payload;
   const gaps = serviceLines.filter((line) => line.googleRepresented === false);
 
   // One document, read in order. A section only appears in the nav when it has
@@ -99,6 +105,7 @@ export default function ProposalView({ token, ownerName }: { token: string; owne
     findings.length ? { id: "evidence", label: "What we found" } : null,
     proposal.scopeItems.length ? { id: "scope", label: "Scope and price" } : null,
     proposal.mockupLinks.length ? { id: "concepts", label: "What it looks like" } : null,
+    unmeasured.length ? { id: "unmeasured", label: "Not measured" } : null,
     { id: "approve", label: "Approve" },
   ].filter(Boolean) as Array<{ id: string; label: string }>;
 
@@ -199,25 +206,47 @@ export default function ProposalView({ token, ownerName }: { token: string; owne
     )}
 
     <section className="proposal-container proposal-body"><div><p className="eyebrow">Why this work</p><h2>A focused response to an identified opportunity.</h2><p>{proposal.scope}</p><p>This scope is designed to improve a measurable customer-acquisition outcome without adding work that is not tied to the stated objective.</p></div><aside><span>Recommended service</span><strong>{proposal.service}</strong><small>Prepared by {ownerName}</small></aside></section>
-    {findings.length > 0 && <section className="proposal-evidence" id="evidence"><div className="proposal-container"><div className="proposal-evidence-head"><div><p className="eyebrow">Audit evidence</p><h2>What the digital presence review found</h2><p className="proposal-locked">Every line below is quoted from the audit of this site. None of it is editable — a figure or a sentence that cannot be traced back to something we read is refused rather than written.</p>{audit && <p>{audit.checksPassed} checks passed · {audit.checksFailed} need work · {audit.confidenceScore}/100 evidence confidence</p>}</div><div className="proposal-score-pair">{audit && <div className="proposal-audit-score"><strong>{audit.score}</strong><span>website score<br />{audit.pagesAudited} page{audit.pagesAudited === 1 ? "" : "s"} reviewed</span></div>}{googleAudit && <div className="proposal-audit-score"><strong>{googleAudit.score}</strong><span>Google presence<br />profile scorecard</span></div>}</div></div>{competitors.length > 0 && <div className="proposal-benchmarks"><span>Competitive website benchmark</span>{competitors.map((item) => <article key={item.id}><strong>{item.name}</strong><b>{item.score}/100</b></article>)}</div>}<div className="proposal-evidence-grid">{findings.map((finding, index) => <article key={`${finding.title}-${index}`}><span>{finding.category} · {finding.severity}</span><h3>{finding.title}</h3><p>{finding.evidence}</p><strong>Recommended</strong><p>{finding.recommendation}</p></article>)}</div></div></section>}
+    {findings.length > 0 && <section className="proposal-evidence" id="evidence"><div className="proposal-container"><div className="proposal-evidence-head"><div><p className="eyebrow">Audit evidence</p><h2>What the digital presence review found</h2><p className="proposal-locked">Every line below is quoted from the audit of this site. None of it is editable — a figure or a sentence that cannot be traced back to something we read is refused rather than written.</p>{audit && <p>{audit.checksPassed} checks passed · {audit.checksFailed} need work · {audit.confidenceScore}/100 evidence confidence</p>}</div><div className="proposal-score-pair">{run ? <div className="proposal-audit-score"><strong>{run.score === null ? "—" : run.score}</strong><span>{run.score === null ? "not scored" : "audit result"}<br />{run.checksVerified} of {run.checksTotal} checks verified</span></div> : audit && <div className="proposal-audit-score"><strong>{audit.score}</strong><span>website score<br />{audit.pagesAudited} page{audit.pagesAudited === 1 ? "" : "s"} reviewed</span></div>}{googleAudit && <div className="proposal-audit-score"><strong>{googleAudit.score}</strong><span>Google presence<br />profile scorecard</span></div>}</div></div>{competitors.length > 0 && <div className="proposal-benchmarks"><span>Competitive website benchmark</span>{competitors.map((item) => <article key={item.id}><strong>{item.name}</strong><b>{item.score}/100</b></article>)}</div>}<div className="proposal-evidence-grid">{findings.map((finding, index) => <article key={`${finding.title}-${index}`}><span>{finding.category} · {finding.severity}</span><h3>{finding.title}</h3><p>{finding.evidence}</p><strong>Recommended</strong><p>{finding.recommendation}</p></article>)}</div></div></section>}
     <section className="proposal-deliverables"><div className="proposal-container"><p className="eyebrow">Included</p><h2>Deliverables and implementation</h2><ol>{proposal.deliverables.map((item, index) => <li key={item}><span>0{index + 1}</span><strong>{item}</strong></li>)}</ol></div></section>
     {proposal.mockupLinks.length > 0 && (
       <section className="proposal-concepts" id="concepts">
-        <div className="proposal-container">
+        <div className="proposal-wide">
           <p className="eyebrow">Concept</p>
           <h2>What this could look like.</h2>
           <p className="proposal-locked">Built from {lead.agencyName}&rsquo;s own colours, type and logo, and filled with sentences read from the current site. A live page, not a picture of one.</p>
+          {/* One per row. Two columns squeezed each frame under the mockup's own
+              mobile breakpoint, so the concept rendered as a phone layout with
+              only the top of the hero showing. */}
           <div className="proposal-concept-grid">
             {proposal.mockupLinks.map((link) => (
               <figure key={link.url}>
+                <div className="concept-chrome"><span /><span /><span /><b>{link.title}</b></div>
                 <iframe src={`${link.url}?embed=1`} title={link.title} loading="lazy" />
                 <figcaption>
-                  <span>{link.title}</span>
+                  <span>Scroll inside the frame to read the whole page.</span>
                   <a href={link.url} target="_blank" rel="noreferrer">Open full size ↗</a>
                 </figcaption>
               </figure>
             ))}
           </div>
+        </div>
+      </section>
+    )}
+
+    {unmeasured.length > 0 && (
+      <section className="proposal-unmeasured" id="unmeasured">
+        <div className="proposal-container">
+          <p className="eyebrow">Not measured</p>
+          <h2>What this audit could not check.</h2>
+          <p className="proposal-locked">Listed rather than left out. An omitted check reads as a pass, and none of these were measured either way.</p>
+          <ul>
+            {unmeasured.map((check, index) => (
+              <li key={`${check.label}-${index}`}>
+                <strong>{check.label}</strong>
+                <span>{check.evidence}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
     )}
