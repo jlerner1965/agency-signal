@@ -30,6 +30,17 @@ type Diagnostics = {
 
 type Summary = { run: Run; modules: RunModule[]; findings: RunFinding[]; diagnostics: Diagnostics | null; pending: boolean; waitingFor: string | null; waitingReason: string };
 
+/** What the chosen findings would cost. Priced, not stored. */
+type Preview = {
+  scopeItems: Array<{ deliverable: string; label: string; criteria: string; rationale: string; quantity: number; display: string }>;
+  priceDisplay: string;
+  minimumApplied: boolean;
+  retainer: { label: string; criteria: string; display: string } | null;
+  chosenCount: number;
+  totalCount: number;
+  message: string;
+};
+
 type Check = {
   id: string; category: string; label: string; status: string;
   weight: number; evidence: string; unverifiedReason?: string;
@@ -70,6 +81,10 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
   // crawl of the prospect's site, so it is asked for rather than assumed.
   const [fresh, setFresh] = useState(false);
   const [error, setError] = useState("");
+  // Which findings go into the proposal. Held per run so opening a different
+  // run does not inherit the last one's selection.
+  const [selection, setSelection] = useState<{ runId: number; ids: number[] } | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [waitNotice, setWaitNotice] = useState("");
   const cancelled = useRef(false);
 
@@ -176,7 +191,9 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
 
       setPackaging("Drafting the proposal…");
       const proposalResponse = await fetch(`/api/audit-runs/${runId}/proposal`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+        method: "POST", headers: { "content-type": "application/json" },
+        // The proposal is priced from the same selection the preview showed.
+        body: JSON.stringify({ findingIds: chosenIds }),
       });
       const proposalPayload = await proposalResponse.json();
       if (!proposalResponse.ok) throw new Error(proposalPayload.error || "Proposal failed.");
@@ -196,6 +213,38 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
 
   const run = summary?.run;
   const unscored = run ? run.overallScore === null : false;
+
+  // Everything the run found, unless the operator has narrowed it. Derived
+  // rather than initialised in an effect, so a newly opened run starts from its
+  // own findings without a render where the selection belongs to the last one.
+  const allFindingIds = summary?.findings.map((finding) => finding.id) ?? [];
+  const chosenIds = selection && run && selection.runId === run.id ? selection.ids : allFindingIds;
+  const chosenKey = chosenIds.join(",");
+  const readyToPrice = Boolean(run && summary && !summary.pending && run.overallScore !== null);
+
+  function toggleFinding(id: number) {
+    if (!run) return;
+    setSelection({
+      runId: run.id,
+      ids: chosenIds.includes(id) ? chosenIds.filter((entry) => entry !== id) : [...chosenIds, id],
+    });
+  }
+
+  // The priced scope follows the selection. Nothing is written until the
+  // package is built, so this can run on every change.
+  const runId = run?.id;
+  useEffect(() => {
+    if (!readyToPrice || runId === undefined) return;
+    let stale = false;
+    fetch(`/api/audit-runs/${runId}/proposal/preview`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ findingIds: chosenKey ? chosenKey.split(",").map(Number) : [] }),
+    })
+      .then((response) => response.json())
+      .then((payload: Preview & { error?: string }) => { if (!stale && !payload.error) setPreview(payload); })
+      .catch(() => { /* a failed preview leaves the last figure rather than blanking it */ });
+    return () => { stale = true; };
+  }, [runId, chosenKey, readyToPrice]);
 
   // Every check that did not run is shown explicitly; omission would read as a pass.
   const unmeasured = (summary?.modules ?? []).flatMap((module) => {
@@ -323,9 +372,24 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
           {summary.findings.length > 0 && (
             <div className="engine-findings">
               <p className="eyebrow">{summary.findings.length} findings, fastest meaningful win first</p>
+              {readyToPrice && (
+                <p className="engine-findings-note">
+                  Tick the findings this proposal should make its case from. The scope and the price follow the selection.
+                </p>
+              )}
               {summary.findings.map((finding) => (
-                <article key={finding.id}>
+                <article key={finding.id} className={readyToPrice && !chosenIds.includes(finding.id) ? "engine-finding-dropped" : ""}>
                   <div className="engine-finding-head">
+                    {readyToPrice && (
+                      <label className="engine-finding-pick">
+                        <input
+                          type="checkbox"
+                          checked={chosenIds.includes(finding.id)}
+                          onChange={() => toggleFinding(finding.id)}
+                        />
+                        <span className="visually-hidden">Include “{finding.title}” in the proposal</span>
+                      </label>
+                    )}
                     <span className={`severity ${finding.severity.toLowerCase()}`}>{finding.severity}</span>
                     <h4>{finding.title}</h4>
                     <span className="engine-priority" title="Impact divided by effort">
@@ -350,10 +414,38 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
               <h3>Build the package</h3>
               <p>Recommendations map from the stored findings by rule; a recommendation that cannot cite one is refused rather than shipped. Nothing here is sent anywhere.</p>
             </div>
-            <button className="primary-button" disabled={Boolean(packaging)} onClick={() => buildPackage(run.id)}>
+            <button className="primary-button" disabled={Boolean(packaging) || chosenIds.length === 0} onClick={() => buildPackage(run.id)}>
               {packaging || "Build report, proposal and mockups"}
             </button>
           </div>
+
+          {preview && (
+            <div className="engine-scope">
+              <div className="engine-scope-head">
+                <p className="eyebrow">Priced from {preview.chosenCount} of {preview.totalCount} findings</p>
+                <b>{preview.priceDisplay || "—"}</b>
+              </div>
+              {preview.scopeItems.length > 0 ? (
+                <ul>
+                  {preview.scopeItems.map((item) => (
+                    <li key={item.deliverable}>
+                      <div>
+                        <strong>{item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ""}</strong>
+                        <small>{item.rationale}</small>
+                      </div>
+                      <b>{item.display}</b>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="engine-scope-empty">{preview.message || "Nothing in this selection triggers a priced deliverable."}</p>
+              )}
+              {preview.minimumApplied && <p className="engine-scope-note">The minimum engagement applies.</p>}
+              {preview.retainer && (
+                <p className="engine-scope-note">Alongside the work: {preview.retainer.label} · {preview.retainer.display}</p>
+              )}
+            </div>
+          )}
 
           {deliverables.blockers.length > 0 && (
             <div className="engine-blockers" role="status">

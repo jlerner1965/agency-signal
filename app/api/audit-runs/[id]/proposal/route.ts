@@ -1,13 +1,19 @@
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { buildRunProposal, pricing, pricingIsPlaceholder, voiceSample } from "@/lib/audit/deliverables";
 
-export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const denied = await requireDashboardApi();
   if (denied) return denied;
   const runId = Number((await context.params).id);
   if (!Number.isInteger(runId)) return Response.json({ error: "Invalid audit run." }, { status: 400 });
   try {
-    const proposal = await buildRunProposal(runId);
+    // The operator's chosen findings, when they narrowed the selection. Absent
+    // means everything the run found, which is what the button did before.
+    const body = (await request.json().catch(() => ({}))) as { findingIds?: unknown };
+    const findingIds = Array.isArray(body.findingIds)
+      ? body.findingIds.map(Number).filter(Number.isInteger)
+      : null;
+    const proposal = await buildRunProposal(runId, findingIds);
     const config = pricing();
     const voice = await voiceSample();
     return Response.json({

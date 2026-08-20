@@ -154,3 +154,54 @@ test("every trigger in the file maps to modules that exist", () => {
   }
   assert.deepEqual(Object.keys(triggerSources).sort(), ["google_presence", "service_line_coverage", "technical_audit"]);
 });
+
+// The operator chooses which findings the proposal makes its case from, so
+// selectDeliverables has to behave correctly on a narrowed set — including
+// sets that leave a deliverable's own justification out.
+
+test("dropping every coverage finding drops the service-page line", () => {
+  const serviceLines = [{ name: "A", hasLandingPage: false }, { name: "B", hasLandingPage: false }];
+  const coverage = finding(10, "service-lines", "Service coverage", "High", "Services are sold without a page that can rank");
+
+  const withCoverage = selectDeliverables(config, {
+    findings: [...broadTechnical, coverage], serviceLines,
+    diagnostics: { pagesReached: 14 }, sitemap: { urlCount: 14 }, googleKnown: false,
+  });
+  assert.ok(withCoverage.some((line) => line.id === "service_page"), "priced while the finding is in play");
+
+  // Same orphaned service lines, but the finding that justifies the work is no
+  // longer being raised. A priced line citing nothing is the one thing the
+  // evidence rule exists to prevent.
+  const without = selectDeliverables(config, {
+    findings: broadTechnical, serviceLines,
+    diagnostics: { pagesReached: 14 }, sitemap: { urlCount: 14 }, googleKnown: false,
+  });
+  assert.ok(!without.some((line) => line.id === "service_page"));
+});
+
+test("every priced line cites at least one of the chosen findings", () => {
+  const chosen = [...broadTechnical, finding(11, "google", "Trust", "High", "The Google profile lists no services at all")];
+  const chosenIds = new Set(chosen.map((entry) => entry.id));
+  const selected = selectDeliverables(config, {
+    findings: chosen,
+    serviceLines: [{ name: "A", hasLandingPage: false }],
+    diagnostics: { pagesReached: 9 }, sitemap: { urlCount: 9 }, googleKnown: true,
+  });
+
+  assert.ok(selected.length > 0);
+  for (const line of selected) {
+    assert.ok(line.findingIds.length > 0, `${line.label} cites nothing`);
+    for (const id of line.findingIds) {
+      assert.ok(chosenIds.has(id), `${line.label} cites ${id}, which was not chosen`);
+    }
+  }
+});
+
+test("an empty selection prices nothing rather than falling back to everything", () => {
+  const selected = selectDeliverables(config, {
+    findings: [],
+    serviceLines: [{ name: "A", hasLandingPage: false }],
+    diagnostics: { pagesReached: 9 }, sitemap: { urlCount: 9 }, googleKnown: true,
+  });
+  assert.deepEqual(selected, []);
+});
