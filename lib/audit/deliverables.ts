@@ -5,6 +5,7 @@ import { assertEvidence, buildRecommendations, groundRationale } from "@/lib/aud
 import { buildVoicePrompt, composeOpening, hasSendableHook, planFromFindings, selectOpeningFindings, validateVoice } from "@/lib/audit/proposal-voice";
 import { extractBrandTokens } from "@/lib/audit/brand";
 import { buildHomepageMockup, buildServicePageMockup } from "@/lib/audit/mockup";
+import { detectRegister } from "@/lib/audit/register";
 import { runtimeValue } from "@/lib/runtime-env";
 import pricingConfig from "@/config/pricing.json";
 import { formatFigure, priceProposal, selectDeliverables, selectRetainer, verifyFigures } from "@/lib/audit/pricing";
@@ -324,7 +325,13 @@ export async function buildRunMockups(runId: number) {
 
   const pages = (crawl.payload as { pages?: Array<Record<string, unknown>> })?.pages ?? [];
   const home = pages[0] as { url?: string; rawHead?: string } | undefined;
-  const places = payloads.find((payload) => payload.source === "places")?.payload as Record<string, string> | null;
+  const places = payloads.find((payload) => payload.source === "places")?.payload as {
+    nationalPhoneNumber?: string;
+    formattedAddress?: string;
+    primaryTypeDisplayName?: { text?: string };
+    primaryType?: string;
+    types?: string[];
+  } | null;
 
   // Inline markup plus the site's own stylesheets: the palette usually lives
   // in the latter, and a mockup in default colours is not recognisably theirs.
@@ -338,16 +345,31 @@ export async function buildRunMockups(runId: number) {
   };
 
   const serviceLines = await serviceLinesFor(runId);
+
+  // Which words the concept pages speak in. Read from what the audit already
+  // collected, never assumed: a mockup in the wrong register is a template with
+  // the prospect's name swapped in, and reads as exactly that.
+  const crawledPages = pages as Array<{ text?: string; h1?: string[]; h2?: string[]; jsonLd?: Array<Record<string, unknown>> }>;
+  const register = detectRegister({
+    googleCategory: String(places?.primaryTypeDisplayName?.text ?? places?.primaryType ?? ""),
+    googleTypes: places?.types ?? [],
+    schemaTypes: crawledPages.flatMap((page) => (page.jsonLd ?? []).map((block) => String(block?.["@type"] ?? ""))),
+    siteText: crawledPages.map((page) => [page.text, ...(page.h1 ?? []), ...(page.h2 ?? [])].filter(Boolean).join(" ")).join(" "),
+  });
+
   await db.delete(mockups).where(eq(mockups.runId, runId));
 
   const built = [
-    { kind: "homepage", title: "Homepage concept", html: buildHomepageMockup(brand, serviceLines) },
-    { kind: "service-page", title: `${serviceLines[0]?.name ?? "Service"} page concept`, html: buildServicePageMockup(brand, serviceLines) },
+    { kind: "homepage", title: "Homepage concept", html: buildHomepageMockup(brand, serviceLines, register.register) },
+    { kind: "service-page", title: `${serviceLines[0]?.name ?? "Service"} page concept`, html: buildServicePageMockup(brand, serviceLines, register.register) },
   ];
 
   await db.insert(mockups).values(built.map((mockup) => ({
     runId, leadId: run.leadId, token: makeToken(), kind: mockup.kind,
-    title: mockup.title, html: mockup.html, brandTokens: JSON.stringify(brand),
+    title: mockup.title, html: mockup.html,
+    // The register is recorded beside the brand tokens so the copy decision is
+    // as auditable as the colour one.
+    brandTokens: JSON.stringify({ ...brand, register: register.register, registerReason: register.reason }),
     source: "template",
   })));
 

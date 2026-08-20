@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { buildRecommendations, validateEvidence, assertEvidence, groundRationale } from "../lib/audit/recommendations.js";
 import { extractBrandTokens, extractPalette } from "../lib/audit/brand.js";
 import { buildHomepageMockup, buildServicePageMockup } from "../lib/audit/mockup.js";
+import { detectRegister, vocabularyFor } from "../lib/audit/register.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -131,4 +132,75 @@ test("a mockup escapes business content rather than interpolating it raw", () =>
   assert.ok(!html.includes("<script>alert(1)</script>"));
   assert.ok(!html.includes("<img onerror"));
   assert.ok(html.includes("&lt;script&gt;"));
+});
+
+// A mockup is placeholder copy in the prospect's own brand. In the wrong
+// register it reads as a template with the name swapped in, which is the one
+// thing it must never look like.
+const CLINIC_WORDS = /\b(practitioner|patient|clinic|appointment|insurance|board[- ]certified|what we treat|book a consultation)\b/i;
+
+test("Google's own category decides the register", () => {
+  assert.equal(detectRegister({ googleCategory: "Medical clinic" }).register, "clinic");
+  assert.equal(detectRegister({ googleCategory: "Mining company" }).register, "supplier");
+  // A category the table does not cover is not a licence to guess.
+  assert.equal(detectRegister({ googleCategory: "Roofing contractor" }).register, "service");
+});
+
+test("with no category, the site has to say it more than once", () => {
+  // One stray phrase is not a register.
+  assert.equal(detectRegister({ siteText: "please see our data sheet" }).register, "service");
+  assert.equal(detectRegister({
+    siteText: "Request bulk pricing. View technical data. Particle size ranges for supplied grades.",
+  }).register, "supplier");
+  // Contradictory evidence falls back rather than picking a side.
+  assert.equal(detectRegister({
+    siteText: "Our patients are board-certified referrals. Bulk pricing, minimum order and lead times on request. Technical data sheet available.",
+  }).register, "service");
+  assert.equal(detectRegister({}).register, "service");
+});
+
+test("a mockup outside the clinic register uses none of its vocabulary", () => {
+  const brand = extractBrandTokens("<style>.b{background:#1f6f5c}</style>", "https://aragocor.test/", "AragoCor Minerals");
+  const lines = [{ name: "Aragonite for Water Treatment", key: "aragonite for water" }];
+
+  for (const register of ["supplier", "service"]) {
+    for (const html of [buildHomepageMockup(brand, lines, register), buildServicePageMockup(brand, lines, register)]) {
+      assert.doesNotMatch(html.replace(/<style[\s\S]*?<\/style>/g, ""), CLINIC_WORDS,
+        `the ${register} register still speaks clinic`);
+      assert.ok(html.includes("Aragonite for Water Treatment"), "still names what the site sells");
+    }
+  }
+
+  // The clinic register keeps the copy the clinic case was written for.
+  assert.match(buildHomepageMockup(brand, lines, "clinic"), CLINIC_WORDS);
+});
+
+test("the default register is the neutral one, never the clinic", () => {
+  const brand = extractBrandTokens("<p></p>", "https://example.test/", "Example");
+  const html = buildHomepageMockup(brand, [{ name: "Line one", key: "line-one" }]);
+  assert.doesNotMatch(html.replace(/<style[\s\S]*?<\/style>/g, ""), CLINIC_WORDS);
+  assert.equal(vocabularyFor("nonsense").offerHeading, vocabularyFor("service").offerHeading);
+});
+
+test("a mockup claims a location only when one was read", () => {
+  const brand = extractBrandTokens("<p></p>", "https://example.test/", "Example");
+  const lines = [{ name: "Line one", key: "line-one" }];
+
+  const withoutCity = buildHomepageMockup(brand, lines, "service");
+  assert.ok(!/your area/i.test(withoutCity), "never invents a service area");
+  assert.ok(!/ in <\/h1>|and more in/i.test(withoutCity));
+
+  const withCity = buildHomepageMockup({ ...brand, city: "Bourne" }, lines, "service");
+  assert.match(withCity, /Line one in Bourne/);
+});
+
+test("a single service line is not described as having more", () => {
+  const brand = extractBrandTokens("<p></p>", "https://example.test/", "Example");
+  const one = buildHomepageMockup(brand, [{ name: "Line one", key: "line-one" }], "service");
+  assert.ok(!/and \d+ more/i.test(one));
+
+  const three = buildHomepageMockup(brand, [
+    { name: "Line one", key: "one" }, { name: "Line two", key: "two" }, { name: "Line three", key: "three" },
+  ], "service");
+  assert.match(three, /and 2 more services/);
 });
