@@ -18,6 +18,13 @@ export const leads = sqliteTable("leads", {
   placeId: text("place_id").notNull().default(""),
   resolvedWebsiteAt: text("resolved_website_at"),
   googlePrimaryCategory: text("google_primary_category").notNull().default(""),
+  /**
+   * What the profile's services section actually lists, entered by hand.
+   * The Places API does not expose it for a profile we do not own, and it was
+   * being read from a column that never existed — so every profile looked as
+   * though it listed nothing, which is a claim the audit was making out loud.
+   */
+  googleServices: text("google_services").notNull().default(""),
   googleReviewRecencyDays: integer("google_review_recency_days").notNull().default(0),
   googleResponseRate: integer("google_response_rate").notNull().default(0),
   googlePhotoCount: integer("google_photo_count").notNull().default(0),

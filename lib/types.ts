@@ -27,6 +27,8 @@ export type Lead = {
   reviewCount: number;
   googleProfileUrl: string;
   googlePrimaryCategory: string;
+  googleServices: string;
+  placeId: string;
   googleReviewRecencyDays: number;
   googleResponseRate: number;
   googlePhotoCount: number;

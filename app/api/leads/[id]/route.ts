@@ -53,6 +53,10 @@ export async function PATCH(
     }
     if (typeof body.googleProfileUrl === "string") values.googleProfileUrl = body.googleProfileUrl.trim();
     if (typeof body.googlePrimaryCategory === "string") values.googlePrimaryCategory = body.googlePrimaryCategory.trim();
+    // What the profile's services section lists, and the id that lets a lookup
+    // skip the pricier search. Both are read off the live profile by hand.
+    if (typeof body.googleServices === "string") values.googleServices = body.googleServices.trim().slice(0, 2_000);
+    if (typeof body.placeId === "string") values.placeId = body.placeId.trim().slice(0, 200);
     if (body.rating !== undefined) values.rating = Math.max(0, Math.min(5, Number(body.rating) || 0));
     for (const field of googleIntegerFields) {
       if (body[field] !== undefined) values[field] = Math.max(0, Math.round(Number(body[field]) || 0));

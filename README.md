@@ -79,11 +79,24 @@ without it, and how to set it.
 | Variable | Read by | Without it |
 | --- | --- | --- |
 | `PAGESPEED_API_KEY` | `lib/audit/collect-technical.ts` | PageSpeed applies its unkeyed quota and starts returning 429 in a batch. Lighthouse and Core Web Vitals checks retry, then report as not measured. Free, no billing details. |
-| `GOOGLE_PLACES_API_KEY` | `lib/audit/places.ts`, via the `google` and `service-lines` collectors | The profile cannot be read, so the service-line gap table — the point of the tool — stays empty, and no Google deliverable is priced. Billed per request. |
+| `GOOGLE_PLACES_API_KEY` | `lib/audit/places.ts`, via the `google` and `service-lines` collectors | The profile is not read automatically. The gap table still runs from the category and service list entered by hand on the prospect's **Google presence** tab — see below. Billed per request. |
 
 ```bash
 npm run auth:credentials -- --pagespeed-key KEY --places-key KEY
 ```
+
+**The Places key is optional.** The service-line gap table — the point of the
+tool — compares what the site sells against what the profile represents, and
+that comparison runs from either the API or a person's entry. Typing the primary
+category into a prospect's **Google presence** tab is enough for the whole
+analysis, at no cost.
+
+Two things no key can supply, because the Places API does not return them for a
+profile you do not own: the **services section**, and the four activity figures
+(recent posts, owner responses, photo count, profile completeness). Both are
+entered on the same tab. Until the services section is entered the audit reports
+it as not measured — it never claims a profile lists nothing on the strength of
+not having looked.
 
 - **PageSpeed:** enable the PageSpeed Insights API in a Google Cloud project and
   create an API key. No billing account is needed.

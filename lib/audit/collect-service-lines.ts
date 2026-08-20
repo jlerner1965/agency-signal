@@ -40,6 +40,10 @@ export async function collectServiceLines(context: CollectContext, keys: Record<
         manual: {
           googlePrimaryCategory: lead.googlePrimaryCategory ?? "",
           googleServices: lead.googleServices ?? "",
+          // Whether a person has actually looked at the live profile. Without
+          // it an empty service list means "nobody checked", not "there are
+          // none", and those are very different things to tell a prospect.
+          googleServicesReviewed: Boolean(lead.googleReviewedAt),
         },
       },
     });
