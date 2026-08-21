@@ -9,7 +9,7 @@ import { detectRegister } from "@/lib/audit/register";
 import { runtimeValue } from "@/lib/runtime-env";
 import pricingConfig from "@/config/pricing.json";
 import { formatFigure, priceProposal, selectDeliverables, selectRetainer, verifyFigures } from "@/lib/audit/pricing";
-import { defaultSections, normalizeSections, sectionOptions } from "@/lib/audit/proposal-sections";
+import { carries, defaultSections, normalizeSections, readSections, sectionOptions } from "@/lib/audit/proposal-sections";
 
 const makeToken = () => crypto.randomUUID().replaceAll("-", "");
 
@@ -382,9 +382,37 @@ export async function buildRunProposal(runId: number, findingIds?: number[] | nu
   // The voice rules let the opening offer to show a page; offering one the
   // reader has no way to reach is the same broken promise as describing an
   // asset that was never built.
-  const runMockups = chosenSections.includes("concepts")
+  const wantsConcepts = chosenSections.includes("concepts");
+  let runMockups = wantsConcepts
     ? await db.select().from(mockups).where(eq(mockups.runId, runId))
     : [];
+
+  // Asked for and not built yet, they are built here.
+  //
+  // The panel builds them before it asks for the proposal, but that ordering
+  // lived entirely in the browser: a proposal requested on its own, or one
+  // requested after the concepts step was skipped because a previously opened
+  // run's part list said to skip it, produced a document whose part list
+  // promised concept pages and which carried none. Nothing said so. The
+  // lead-based builder has always built them on demand; this one now does too,
+  // so the document cannot depend on which order two requests happened to
+  // arrive in.
+  let conceptsBlocked = "";
+  if (wantsConcepts && !runMockups.length) {
+    try {
+      runMockups = await buildRunMockups(runId);
+    } catch (reason) {
+      // A concept page that cannot be built does not take the proposal down
+      // with it — it is reported and left out.
+      conceptsBlocked = reason instanceof Error ? reason.message : "The concept pages could not be built.";
+    }
+  }
+  // A part that came back with nothing is not a part this document carries, and
+  // the stored choice has to say so or the reader is promised a section the
+  // page does not render.
+  const sectionsCarried = !wantsConcepts || runMockups.length
+    ? chosenSections
+    : chosenSections.filter((id) => id !== "concepts");
   const voice = await voiceSample();
   const opening = chosenSections.includes("opening")
     ? await writeOpening({
@@ -407,8 +435,17 @@ export async function buildRunProposal(runId: number, findingIds?: number[] | nu
     leadId: run.leadId, runId, version, token: makeToken(),
     offerId: priced.lines[0].id, title: priced.lines[0].label,
     service: priced.lines.map((line) => line.label).join(", "),
-    outcome: priced.lines[0].criteria,
-    scope: priced.lines.map((line) => line.rationale).join(" "),
+    // What the first line is for, in the words the audit justified it with. The
+    // band criteria used to stand here — so the sentence under the title, the
+    // one the reader takes as the promise of the engagement, was an internal
+    // pricing rule: "11-20 pages, or structural rework plus rebuild". The
+    // criteria still print where they are honest, under the priced line itself.
+    outcome: priced.lines[0].rationale || priced.lines[0].criteria,
+    // One rationale per line, so the document can lay them out as separate
+    // paragraphs. Joined with a space they arrived as a single line, which is
+    // the one shape ScopeProse cannot break up — every run-built proposal
+    // opened with four to eight justifications run together in one block.
+    scope: priced.lines.map((line) => line.rationale).join("\n"),
     deliverables: JSON.stringify(priced.lines.map((line) => `${line.label}${line.quantity > 1 ? ` × ${line.quantity}` : ""}`)),
     scopeItems: JSON.stringify(scopeItems),
     openingProse: opening.text,
@@ -421,7 +458,7 @@ export async function buildRunProposal(runId: number, findingIds?: number[] | nu
     // A reference the reader cannot follow is the same problem as one that
     // describes an asset that does not exist.
     mockupLinks: JSON.stringify(runMockups.map((mockup) => ({ kind: mockup.kind, title: mockup.title, url: `/mockup/${mockup.token}` }))),
-    sections: JSON.stringify(chosenSections),
+    sections: JSON.stringify(sectionsCarried),
     minimumApplied: priced.belowMinimum,
     timeline: "",
     tier: priced.lines[0].bandKey,
@@ -430,7 +467,7 @@ export async function buildRunProposal(runId: number, findingIds?: number[] | nu
     voicePlaceholder: voice.placeholder,
     expiresAt: new Date(Date.now() + 14 * 86_400_000).toISOString(),
   }).returning();
-  return proposal;
+  return { proposal, conceptsBlocked };
 }
 
 /** Mockups, each at its own stable public URL. No image pipeline. */
@@ -486,23 +523,79 @@ export async function buildRunMockups(runId: number) {
   const content = readMockupContent(crawledPages, serviceLines);
   const options = { register: register.register, content };
 
-  await db.delete(mockups).where(eq(mockups.runId, runId));
-
   const built = [
     { kind: "homepage", title: "Homepage concept", html: buildHomepageMockup(brand, serviceLines, options) },
     { kind: "service-page", title: `${serviceLines[0]?.name ?? "Service"} page concept`, html: buildServicePageMockup(brand, serviceLines, options) },
   ];
 
-  await db.insert(mockups).values(built.map((mockup) => ({
-    runId, leadId: run.leadId, token: makeToken(), kind: mockup.kind,
-    title: mockup.title, html: mockup.html,
-    // The register is recorded beside the brand tokens so the copy decision is
-    // as auditable as the colour one.
-    brandTokens: JSON.stringify({ ...brand, register: register.register, registerReason: register.reason }),
-    source: "template",
-  })));
+  // Rebuilt in place, keeping each concept's token.
+  //
+  // This used to delete the run's rows and reinsert them with fresh tokens, and
+  // a proposal stores its concept links by value. So building the package a
+  // second time — after moving a tick, or because reopening a past run made it
+  // look unbuilt — turned every concept frame in the document already sent into
+  // "This mockup link is not valid.". The concepts were on the proposal and the
+  // reader could not see one of them.
+  //
+  // A rebuild of the same run is a regeneration of the same concept from the
+  // same evidence, so the link that was sent goes on resolving, to the current
+  // version of the page it named.
+  const existing = await db.select().from(mockups).where(eq(mockups.runId, runId));
+  const tokenFor = new Map(existing.map((row) => [row.kind, row.token]));
+  // The register is recorded beside the brand tokens so the copy decision is as
+  // auditable as the colour one.
+  const brandTokens = JSON.stringify({ ...brand, register: register.register, registerReason: register.reason });
+
+  for (const mockup of built) {
+    const values = {
+      runId, leadId: run.leadId, kind: mockup.kind,
+      title: mockup.title, html: mockup.html, brandTokens, source: "template",
+    };
+    const token = tokenFor.get(mockup.kind);
+    if (token) await db.update(mockups).set(values).where(eq(mockups.token, token));
+    else await db.insert(mockups).values({ ...values, token: makeToken() });
+  }
+
+  // A kind this build no longer produces is a concept that no longer exists,
+  // and is the one case where retiring the link is the honest outcome.
+  const kinds = new Set(built.map((mockup) => mockup.kind));
+  const retired = existing.filter((row) => !kinds.has(row.kind)).map((row) => row.id);
+  if (retired.length) await db.delete(mockups).where(inArray(mockups.id, retired));
 
   return db.select().from(mockups).where(eq(mockups.runId, runId));
+}
+
+/**
+ * The package a run already carries.
+ *
+ * Opening a past run used to fetch its summary and nothing else, so a run that
+ * had been packaged came back looking unpackaged — no proposal link, no
+ * recommendations, no concepts. The obvious next move was to press Build again,
+ * which wrote a new proposal version over a document that had already been
+ * sent. Everything here is read, not built.
+ */
+export async function readRunPackage(runId: number) {
+  const db = await getDb();
+  const recs = await db.select().from(recommendations).where(eq(recommendations.runId, runId)).orderBy(recommendations.sortOrder);
+  const [proposal] = await db.select().from(proposals).where(eq(proposals.runId, runId)).orderBy(desc(proposals.version)).limit(1);
+  const built = await db.select().from(mockups).where(eq(mockups.runId, runId));
+  const sections = proposal ? readSections(proposal.sections) : null;
+  // The same three reasons the build reports, read back off the row that
+  // recorded them rather than recomputed against config that may have moved on.
+  const wantsOpening = carries(sections, "opening");
+  return {
+    recommendations: recs,
+    proposal: proposal ?? null,
+    sections,
+    mockups: built.map((mockup) => ({ kind: mockup.kind, title: mockup.title, url: `/mockup/${mockup.token}` })),
+    blockers: proposal
+      ? [
+        proposal.pricingPlaceholder ? "config/pricing.json still holds placeholder amounts." : "",
+        wantsOpening && proposal.voicePlaceholder ? "config/voice.md has not been filled in, so no opening was written." : "",
+        wantsOpening ? proposal.openingBlocked : "",
+      ].filter(Boolean)
+      : [],
+  };
 }
 
 /**

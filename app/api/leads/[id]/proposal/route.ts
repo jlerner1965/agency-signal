@@ -195,6 +195,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       status: "Sent",
       sections: JSON.stringify(stored),
       mockupLinks: JSON.stringify(mockupLinks),
+      // This path prices from the offer catalog, not from config/pricing.json,
+      // so the placeholder flag that column defaults to is not a statement about
+      // this document. Left at its default, every proposal built here opened, in
+      // the prospect's copy, with "Draft — not ready to send. The amounts below
+      // come from placeholder pricing." above a real price.
+      pricingPlaceholder: false,
       expiresAt,
     }).returning();
     const [updatedLead] = await db.update(leads).set({ status: "Proposal sent", dealValue: price, nextFollowUpAt: new Date(Date.now() + 2 * 86_400_000).toISOString(), updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(leads.id, leadId)).returning();

@@ -24,7 +24,12 @@ test("a run holding everything offers every part", () => {
   assert.deepEqual(defaultSections(options), sectionIds);
   // The concepts option says what it would build, so the box is not ticked blind.
   const concepts = options.find((option) => option.id === "concepts");
-  assert.match(concepts.note, /colours, type and logo/);
+  assert.match(concepts.note, /Two live concept pages/);
+  // And it does not promise what the builder cannot guarantee. Every brand
+  // token has a fallback, so a site whose palette, font or logo could not be
+  // read still produces a page — one that would not match the promise.
+  assert.doesNotMatch(concepts.note, /logo/i);
+  assert.doesNotMatch(concepts.detail, /own colours/i);
 });
 
 test("a part with nothing behind it is offered to nobody, and says why", () => {

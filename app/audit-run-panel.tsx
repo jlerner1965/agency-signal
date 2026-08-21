@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import ProposalSectionPicker, { type SectionOption } from "./proposal-sections";
+import { carries, sectionCatalog } from "@/lib/audit/proposal-sections";
 
 type RunModule = {
   id: number; module: string; label: string; status: string; message: string;
@@ -62,6 +63,11 @@ function msUntil(iso: string, capMs = 65_000) {
   return Math.min(Math.max(0, new Date(iso).getTime() - Date.now()), capMs);
 }
 
+/** A part's name as the picker gives it, for saying back what was built. */
+function labelForSection(id: string) {
+  return sectionCatalog.find((section) => section.id === id)?.label ?? id;
+}
+
 const MODULE_TONE: Record<string, string> = {
   Complete: "good", Running: "watch", Queued: "neutral",
   Skipped: "neutral", Unreachable: "critical", Failed: "critical",
@@ -76,8 +82,17 @@ type Deliverables = {
   sections: string[] | null;
 };
 
-export default function AuditRunPanel({ leadId, reportToken }: { leadId: number; reportToken: string }) {
-  const [deliverables, setDeliverables] = useState<Deliverables>({ recommendations: [], proposal: null, blockers: [], mockups: [], sections: null });
+/** No package yet. What a run reads as before anything has been built for it. */
+const NO_PACKAGE: Deliverables = { recommendations: [], proposal: null, blockers: [], mockups: [], sections: null };
+
+export default function AuditRunPanel({ leadId, reportToken, onBuilt }: {
+  leadId: number;
+  reportToken: string;
+  /** Told when this run's proposal is written, so the rest of the prospect stops
+   *  offering to create a second, unrelated one. */
+  onBuilt?: () => void | Promise<void>;
+}) {
+  const [deliverables, setDeliverables] = useState<Deliverables>(NO_PACKAGE);
   const [packaging, setPackaging] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [history, setHistory] = useState<Run[]>([]);
@@ -93,10 +108,18 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
   // findings are: opening a different run must not inherit the last one's
   // answer to a question about a different site.
   const [parts, setParts] = useState<{ runId: number; ids: string[] } | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  // Stamped with the run it was priced for, for the same reason the findings and
+  // the parts are. It was the one piece of per-run state that was not: opening a
+  // second run left the first one's part list deciding what the build would
+  // produce, and a run whose site could not be read offered concept pages
+  // because a different run's preview said they could be built.
+  const [preview, setPreview] = useState<{ runId: number; data: Preview } | null>(null);
   // The parts of a built proposal a person writes. Evidence is not among them.
   const [edits, setEdits] = useState<{ title: string; timeline: string; openingProse: string } | null>(null);
   const [saving, setSaving] = useState("");
+  // A failed build is reported where the build was started, not at the top of
+  // the panel above the whole findings list.
+  const [packageError, setPackageError] = useState("");
   const [waitNotice, setWaitNotice] = useState("");
   const cancelled = useRef(false);
 
@@ -146,8 +169,40 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
     throw new Error("The run did not finish within the expected number of steps.");
   }
 
+  /**
+   * What this run has already been packaged into.
+   *
+   * Read, never built. A run opened from the history used to come back as its
+   * summary alone, so one that had already been packaged looked exactly like
+   * one that never had — and pressing Build to "get the link back" wrote a new
+   * version of a document that had already gone out.
+   */
+  async function loadPackage(runId: number) {
+    try {
+      const response = await fetch(`/api/audit-runs/${runId}/package`);
+      const payload = await response.json();
+      if (!response.ok) return;
+      setDeliverables({
+        recommendations: payload.recommendations ?? [],
+        proposal: payload.proposal ?? null,
+        blockers: payload.blockers ?? [],
+        mockups: payload.mockups ?? [],
+        sections: payload.sections ?? null,
+      });
+      const built = payload.proposal;
+      setEdits(built ? { title: built.title ?? "", timeline: built.timeline ?? "", openingProse: built.openingProse ?? "" } : null);
+    } catch {
+      /* a package that will not load leaves the run readable; nothing is built here */
+    }
+  }
+
   async function startRun() {
+    // A new run starts with nothing built for it. The package block is not
+    // keyed to a run, so without this the previous run's proposal link, price
+    // and concept links sit under the new run as though they were its own —
+    // and saving an edit there rewrites the previous run's document.
     setBusy(true); setError(""); setSummary(null);
+    setDeliverables(NO_PACKAGE); setEdits(null); setPreview(null); setPackaging(""); setPackageError("");
     try {
       const response = await fetch("/api/audit-runs", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -189,12 +244,14 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
 
   async function openRun(runId: number) {
     setBusy(true); setError("");
+    setDeliverables(NO_PACKAGE); setEdits(null); setPreview(null); setPackaging(""); setPackageError("");
     try {
       const response = await fetch(`/api/audit-runs/${runId}`);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load that run.");
       setSummary(payload);
       if (payload.pending) await drain(runId);
+      else await loadPackage(runId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load that run.");
     } finally {
@@ -215,8 +272,8 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
    * hardest, and a document that will not show them has no use for them.
    */
   async function buildPackage(runId: number) {
-    setPackaging("Building recommendations…");
-    setError("");
+    setPackaging("Step 1 of 3 — mapping the recommendations…");
+    setError(""); setPackageError("");
     const wantsConcepts = includedParts === null || includedParts.includes("concepts");
     try {
       const recResponse = await fetch(`/api/audit-runs/${runId}/recommendations`, { method: "POST" });
@@ -225,13 +282,13 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
 
       let mockupPayload: { mockups?: Array<{ kind: string; title: string; url: string }>; error?: string } = {};
       if (wantsConcepts) {
-        setPackaging("Generating mockups…");
+        setPackaging("Step 2 of 3 — building the concept pages…");
         const mockupResponse = await fetch(`/api/audit-runs/${runId}/mockups`, { method: "POST" });
         mockupPayload = await mockupResponse.json();
-        if (!mockupResponse.ok) throw new Error(mockupPayload.error || "Mockups failed.");
+        if (!mockupResponse.ok) throw new Error(mockupPayload.error || "The concept pages could not be built.");
       }
 
-      setPackaging("Drafting the proposal…");
+      setPackaging(wantsConcepts ? "Step 3 of 3 — writing the proposal…" : "Step 2 of 2 — writing the proposal…");
       const proposalResponse = await fetch(`/api/audit-runs/${runId}/proposal`, {
         method: "POST", headers: { "content-type": "application/json" },
         // The proposal is priced from the same selection the preview showed,
@@ -250,8 +307,17 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
         sections: proposalPayload.sections ?? null,
       });
       setEdits(built ? { title: built.title ?? "", timeline: built.timeline ?? "", openingProse: built.openingProse ?? "" } : null);
+      // The rest of the prospect reads its proposal from the lead. Without
+      // this, the Proposal tab still showed an empty create-form after the
+      // engine had just written one, and the obvious next move there was to
+      // generate a second, unrelated document that became the link everything
+      // else handed out.
+      if (built) await onBuilt?.();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The package could not be built.");
+      // Reported beside the button that started it. This used to render at the
+      // top of the panel, a screenful above, so a failed build looked like
+      // nothing had happened at all.
+      setPackageError(reason instanceof Error ? reason.message : "The package could not be built.");
     } finally {
       setPackaging("");
     }
@@ -268,14 +334,29 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
   const chosenKey = chosenIds.join(",");
   const readyToPrice = Boolean(run && summary && !summary.pending && run.overallScore !== null);
 
+  // Only a preview priced for the run on screen counts. One priced for a
+  // different run is not a slightly stale figure, it is a different prospect's
+  // answer, and it used to decide both the part list and whether the concept
+  // pages were built at all.
+  const livePreview = preview && run && preview.runId === run.id ? preview.data : null;
+
   // The parts on offer follow the finding selection, because a part is only
-  // offered when this run holds what fills it. Until the first preview lands
-  // there is nothing to have chosen, and null asks the build for every part it
-  // can fill — the same document the button produced before the picker.
-  const sectionOptions = preview?.sections ?? [];
-  const includedParts = preview
-    ? (parts && run && parts.runId === run.id ? parts.ids : preview.defaultSections)
+  // offered when this run holds what fills it. Until this run's preview lands
+  // there is nothing to have chosen, and the build button waits for it rather
+  // than committing to a document nobody has been shown.
+  const sectionOptions = livePreview?.sections ?? [];
+  const includedParts = livePreview
+    ? (parts && run && parts.runId === run.id ? parts.ids : livePreview.defaultSections)
     : null;
+  const buildsConcepts = includedParts === null || includedParts.includes("concepts");
+  // The steps this build will actually run, named the same way everywhere they
+  // appear. "Report" was in the button and in nothing else — the client report
+  // is live from the moment the run finishes and no build produces it.
+  const buildSteps = [
+    "map the recommendations",
+    buildsConcepts ? "build the concept pages" : "",
+    "write the proposal",
+  ].filter(Boolean);
 
   function toggleFinding(id: number) {
     if (!run) return;
@@ -296,7 +377,7 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
       body: JSON.stringify({ findingIds: chosenKey ? chosenKey.split(",").map(Number) : [] }),
     })
       .then((response) => response.json())
-      .then((payload: Preview & { error?: string }) => { if (!stale && !payload.error) setPreview(payload); })
+      .then((payload: Preview & { error?: string }) => { if (!stale && !payload.error) setPreview({ runId, data: payload }); })
       .catch(() => { /* a failed preview leaves the last figure rather than blanking it */ });
     return () => { stale = true; };
   }, [runId, chosenKey, readyToPrice]);
@@ -311,7 +392,7 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
     <section className="engine-panel">
       <div className="audit-section-intro">
         <div>
-          <p className="eyebrow">Audit engine</p>
+          <p className="eyebrow">Step 1 · Audit engine</p>
           <h3>Run the module set</h3>
           <p>Each module runs as its own step and stores what it fetched. A run resumes where it stopped, and a site that could not be read is reported as unread rather than scored.</p>
         </div>
@@ -429,7 +510,9 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
               <p className="eyebrow">{summary.findings.length} findings, fastest meaningful win first</p>
               {readyToPrice && (
                 <p className="engine-findings-note">
-                  Tick the findings this proposal should make its case from. The scope and the price follow the selection.
+                  <b>Step 2 — choose the findings.</b> Tick the ones this proposal should make its case from.
+                  The scope, the price, and which parts the document is able to carry all follow this selection,
+                  and all three are shown under Deliverables below.
                 </p>
               )}
               {summary.findings.map((finding) => (
@@ -461,129 +544,180 @@ export default function AuditRunPanel({ leadId, reportToken }: { leadId: number;
         </section>
       )}
 
-      {run && summary && !summary.pending && run.overallScore !== null && (
+      {run && summary && !summary.pending && (
         <section className="engine-package">
+          {/* The block reads in the order the work happens: what goes in, what
+              it costs, then the button that commits to both. The button used to
+              sit in this header, above a picker and a price that had not
+              rendered yet, so the first thing on offer was to build a document
+              the operator had not been shown. */}
           <div className="audit-section-intro">
             <div>
-              <p className="eyebrow">Deliverables</p>
-              <h3>Build the package</h3>
+              <p className="eyebrow">Step 3 · Deliverables</p>
+              <h3>Choose what goes in, then build it</h3>
               <p>Recommendations map from the stored findings by rule; a recommendation that cannot cite one is refused rather than shipped. Nothing here is sent anywhere.</p>
             </div>
-            <button className="primary-button" disabled={Boolean(packaging) || chosenIds.length === 0} onClick={() => buildPackage(run.id)}>
-              {packaging || (includedParts?.includes("concepts") === false
-                ? "Build report and proposal"
-                : "Build report, proposal and mockups")}
-            </button>
           </div>
 
-          <ProposalSectionPicker
-            options={sectionOptions}
-            chosen={includedParts ?? []}
-            disabled={Boolean(packaging)}
-            onChange={(ids) => run && setParts({ runId: run.id, ids })}
-          />
-
-          {preview && (
-            <div className="engine-scope">
-              <div className="engine-scope-head">
-                <p className="eyebrow">Priced from {preview.chosenCount} of {preview.totalCount} findings</p>
-                <b>{preview.priceDisplay || "—"}</b>
-              </div>
-              {preview.scopeItems.length > 0 ? (
-                <ul>
-                  {preview.scopeItems.map((item) => (
-                    <li key={item.deliverable}>
-                      <div>
-                        <strong>{item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ""}</strong>
-                        <small>{item.rationale}</small>
-                      </div>
-                      <b>{item.display}</b>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="engine-scope-empty">{preview.message || "Nothing in this selection triggers a priced deliverable."}</p>
-              )}
-              {preview.minimumApplied && <p className="engine-scope-note">The minimum engagement applies.</p>}
-              {preview.retainer && (
-                <p className="engine-scope-note">Alongside the work: {preview.retainer.label} · {preview.retainer.display}</p>
-              )}
-            </div>
-          )}
-
-          {deliverables.blockers.length > 0 && (
-            <div className="engine-blockers" role="status">
-              <strong>Not exportable yet</strong>
-              <ul>{deliverables.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
-            </div>
-          )}
-
-          {deliverables.recommendations.length > 0 && (
-            <div className="engine-recs">
-              <p className="eyebrow">{deliverables.recommendations.length} recommendations</p>
-              {deliverables.recommendations.map((rec) => (
-                <article key={rec.id}>
-                  <div><strong>{rec.label}</strong><span className="engine-rec-source">{rec.rationaleSource === "model" ? "rationale written by model" : "rationale derived from findings"}</span></div>
-                  <p>{rec.rationale}</p>
-                  <small>Cites findings {JSON.parse(rec.findingIds || "[]").map((id: number) => `F${id}`).join(", ")}</small>
-                </article>
-              ))}
-            </div>
-          )}
-
-          {deliverables.proposal && edits && (
-            <div className="engine-editor">
-              <div className="engine-editor-head">
-                <p className="eyebrow">Your words</p>
-                <p>Everything else in the document — the evidence, the sentences quoted from their site, and every figure — comes from the audit and the pricing file, and is not editable here.</p>
-              </div>
-              <label>
-                Title
-                <input value={edits.title} onChange={(event) => setEdits({ ...edits, title: event.target.value })} />
-              </label>
-              <label>
-                Timeline
-                <input
-                  value={edits.timeline}
-                  placeholder="Left out of the document while empty"
-                  onChange={(event) => setEdits({ ...edits, timeline: event.target.value })}
-                />
-              </label>
-              <label>
-                Opening
-                <textarea rows={6} value={edits.openingProse} onChange={(event) => setEdits({ ...edits, openingProse: event.target.value })} />
-              </label>
-              <div className="engine-editor-actions">
-                <button className="primary-button" disabled={Boolean(saving)} onClick={saveEdits}>{saving || "Save"}</button>
-              </div>
-            </div>
-          )}
-
-          {deliverables.proposal && deliverables.sections && (
-            <p className="engine-built-parts" role="status">
-              {deliverables.sections.length
-                // Said back after the build, because a part that was ticked
-                // against evidence this run turned out not to have is dropped
-                // rather than refused, and the operator should not find that
-                // out by reading the document.
-                ? <>This proposal carries: {deliverables.sections
-                  .map((id) => sectionOptions.find((option) => option.id === id)?.label ?? id)
-                  .join(", ")}.</>
-                : "This proposal carries none of the optional parts — the scope, the price and the deliverables only."}
+          {unscored ? (
+            // Shown with its reason rather than dropped from the page. A step
+            // that vanishes reads as a step this tool does not have.
+            <p className="engine-scope-empty" role="status">
+              Nothing can be built from a run with no score. A proposal priced off a handful of
+              verified checks would read as confident when it is not, so the package waits for a
+              run that scored{run.reachable === false ? " — this one could not read the site at all." : "."}
             </p>
-          )}
+          ) : (
+            <>
+              <ProposalSectionPicker
+                options={sectionOptions}
+                chosen={includedParts ?? []}
+                disabled={Boolean(packaging)}
+                onChange={(ids) => run && setParts({ runId: run.id, ids })}
+              />
 
-          <div className="engine-links">
-            <a href={`/report/${reportToken}`} target="_blank" rel="noreferrer">Open the client report ↗</a>
-            {deliverables.proposal && (
-              <a href={`/proposal/${deliverables.proposal.token}`} target="_blank" rel="noreferrer">
-                Proposal v{deliverables.proposal.version} · {deliverables.proposal.title} ↗
-              </a>
-            )}
-            {deliverables.mockups.map((mockup) => (
-              <a key={mockup.url} href={mockup.url} target="_blank" rel="noreferrer">{mockup.title} ↗</a>
-            ))}
-          </div>
+              {livePreview ? (
+                <div className="engine-scope">
+                  <div className="engine-scope-head">
+                    <p className="eyebrow">Priced from {livePreview.chosenCount} of {livePreview.totalCount} findings</p>
+                    <b>{livePreview.priceDisplay || "—"}</b>
+                  </div>
+                  {livePreview.scopeItems.length > 0 ? (
+                    <ul>
+                      {livePreview.scopeItems.map((item) => (
+                        <li key={item.deliverable}>
+                          <div>
+                            <strong>{item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ""}</strong>
+                            <small>{item.rationale}</small>
+                          </div>
+                          <b>{item.display}</b>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="engine-scope-empty">{livePreview.message || "Nothing in this selection triggers a priced deliverable."}</p>
+                  )}
+                  {livePreview.minimumApplied && <p className="engine-scope-note">The minimum engagement applies.</p>}
+                  {livePreview.retainer && (
+                    <p className="engine-scope-note">Alongside the work: {livePreview.retainer.label} · {livePreview.retainer.display}</p>
+                  )}
+                </div>
+              ) : (
+                <p className="engine-scope-empty" role="status">Pricing this run&rsquo;s selection…</p>
+              )}
+
+              <div className="engine-build">
+                <button
+                  className="primary-button"
+                  // Not clickable until this run's own price and part list are on
+                  // screen. Pressing it before they arrived built whatever the
+                  // server thought the run could fill — or, worse, whatever the
+                  // previously opened run's preview still said.
+                  disabled={Boolean(packaging) || chosenIds.length === 0 || !livePreview}
+                  onClick={() => buildPackage(run.id)}
+                >
+                  {packaging || "Build the package"}
+                </button>
+                <small role="status">
+                  {chosenIds.length === 0
+                    ? "Tick at least one finding above. A proposal with nothing to cite is not built."
+                    : !livePreview
+                      ? "Waiting for this run's price before anything can be built from it."
+                      : <>Runs {buildSteps.length} steps, in order: {buildSteps.join(", then ")}.
+                        {buildsConcepts
+                          ? " The concept pages are the slow step — they read the prospect's site hardest."
+                          : " The concept pages are unticked, so they are not built at all."}</>}
+                </small>
+                {packageError && <p className="form-error" role="alert">{packageError}</p>}
+              </div>
+
+              {deliverables.blockers.length > 0 && (
+                <div className="engine-blockers" role="status">
+                  <strong>Not exportable yet</strong>
+                  <ul>{deliverables.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+                </div>
+              )}
+
+              {deliverables.proposal && deliverables.sections && (
+                <p className="engine-built-parts" role="status">
+                  {deliverables.sections.length
+                    // Said back after the build, because a part that was ticked
+                    // against evidence this run turned out not to have is dropped
+                    // rather than refused, and the operator should not find that
+                    // out by reading the document.
+                    ? <>This proposal carries: {deliverables.sections.map(labelForSection).join(", ")}.</>
+                    : "This proposal carries none of the optional parts — the opening argument and the deliverables list only, with no figures anywhere in it."}
+                  {deliverables.sections.length > 0 && !deliverables.sections.includes("concepts") &&
+                    " It carries no concept pages, so nothing in it shows what the site could look like."}
+                </p>
+              )}
+
+              {/* The links come before the editor: what was built, and a way to
+                  look at it, before being asked to write copy for it. */}
+              <div className="engine-links">
+                <a href={`/report/${reportToken}`} target="_blank" rel="noreferrer">Open the client report ↗</a>
+                {deliverables.proposal && (
+                  <a href={`/proposal/${deliverables.proposal.token}`} target="_blank" rel="noreferrer">
+                    Proposal v{deliverables.proposal.version} · {deliverables.proposal.title} ↗
+                  </a>
+                )}
+                {deliverables.mockups.map((mockup) => (
+                  <a key={mockup.url} href={mockup.url} target="_blank" rel="noreferrer">{mockup.title} ↗</a>
+                ))}
+              </div>
+
+              {deliverables.recommendations.length > 0 && (
+                <div className="engine-recs">
+                  <p className="eyebrow">{deliverables.recommendations.length} recommendations</p>
+                  {deliverables.recommendations.map((rec) => (
+                    <article key={rec.id}>
+                      <div><strong>{rec.label}</strong><span className="engine-rec-source">{rec.rationaleSource === "model" ? "rationale written by model" : "rationale derived from findings"}</span></div>
+                      <p>{rec.rationale}</p>
+                      <small>Cites findings {JSON.parse(rec.findingIds || "[]").map((id: number) => `F${id}`).join(", ")}</small>
+                    </article>
+                  ))}
+                </div>
+              )}
+
+              {deliverables.proposal && edits && (
+                <div className="engine-editor">
+                  <div className="engine-editor-head">
+                    <p className="eyebrow">Your words</p>
+                    <p>Everything else in the document — the evidence, the sentences quoted from their site, and every figure — comes from the audit and the pricing file, and is not editable here.</p>
+                  </div>
+                  <label>
+                    Title
+                    <input value={edits.title} onChange={(event) => setEdits({ ...edits, title: event.target.value })} />
+                  </label>
+                  <label>
+                    Timeline
+                    <input
+                      value={edits.timeline}
+                      placeholder="Left out of the document while empty"
+                      onChange={(event) => setEdits({ ...edits, timeline: event.target.value })}
+                    />
+                  </label>
+                  {/* Offered only when the document has an opening to put it in.
+                      A textarea for a part that was not built saved happily and
+                      showed up nowhere. */}
+                  {carries(deliverables.sections, "opening") ? (
+                    <label>
+                      Opening
+                      <textarea rows={6} value={edits.openingProse} onChange={(event) => setEdits({ ...edits, openingProse: event.target.value })} />
+                    </label>
+                  ) : (
+                    <p className="engine-editor-note">
+                      No opening field: this document was built without one, so there is nowhere for it to appear.
+                      Tick <b>Opening</b> above and build again to write one.
+                    </p>
+                  )}
+                  <div className="engine-editor-actions">
+                    <button className="primary-button" disabled={Boolean(saving)} onClick={saveEdits}>{saving || "Save"}</button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </section>
       )}
 
