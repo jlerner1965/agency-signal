@@ -4,6 +4,7 @@
 // values are printed for the hosted runtime, which needs them as secrets.
 import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
+import { promptSecret } from "../lib/secret-prompt.js";
 import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 
@@ -57,19 +58,8 @@ async function prompt(question, { silent = false } = {}) {
     console.error("No terminal is attached. Pass --email and --password instead.");
     process.exit(64);
   }
+  if (silent) return promptSecret(question);
   const rl = createInterface({ input: stdin, output: stdout, terminal: true });
-  if (silent) {
-    // Keep the typed password off the screen without dropping keypresses.
-    const mute = (chunk, encoding, callback) => callback();
-    const original = stdout.write.bind(stdout);
-    stdout.write(question);
-    rl.output.write = mute;
-    const answer = await rl.question("");
-    rl.output.write = original;
-    stdout.write("\n");
-    rl.close();
-    return answer;
-  }
   const answer = await rl.question(question);
   rl.close();
   return answer;

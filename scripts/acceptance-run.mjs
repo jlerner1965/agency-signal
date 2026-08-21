@@ -14,6 +14,7 @@
 // a release rather than only inform one.
 
 import { formatBatch, summarizeBatch } from "../lib/acceptance-summary.js";
+import { promptSecret } from "../lib/secret-prompt.js";
 
 const TICK_LIMIT = 60;
 const TICK_PAUSE_MS = 5000;
@@ -52,22 +53,6 @@ async function readDevVar(key) {
   } catch {
     return "";
   }
-}
-
-/** Typed, not echoed. Mirrors the prompt in scripts/setup-credentials.mjs. */
-async function promptSecret(question) {
-  const { createInterface } = await import("node:readline/promises");
-  const { stdin, stdout } = await import("node:process");
-  if (!stdin.isTTY) return "";
-  const rl = createInterface({ input: stdin, output: stdout, terminal: true });
-  const original = stdout.write.bind(stdout);
-  stdout.write(question);
-  rl.output.write = (chunk, encoding, callback) => { if (callback) callback(); };
-  const answer = await rl.question("");
-  rl.output.write = original;
-  stdout.write("\n");
-  rl.close();
-  return answer;
 }
 
 const email = flags.email || process.env.AGENCYSIGNAL_LOGIN_EMAIL || (await readDevVar("AGENCYSIGNAL_LOGIN_EMAIL"));
