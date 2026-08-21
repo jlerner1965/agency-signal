@@ -27,9 +27,15 @@ evidence, and is weighted accordingly.
    same site reuses them. Tick **Fetch the sources again** to ignore what
    earlier runs read today — the run still shares one crawl across its own
    modules, so the prospect's site is fetched once, not once per module.
-4. When it finishes, tick the findings the proposal should argue from and the
-   parts the document should carry, then press **Build report, proposal and
-   mockups**.
+4. When it finishes, tick the findings the proposal should argue from
+   (**step 2**), then the parts the document should carry and read the price
+   they come to (**step 3**), then press **Build the package**. The button
+   names the steps it will run, in order, and sits below both choices because
+   it commits to them.
+
+Opening a past run from **Previous runs** shows the package it already has —
+its proposal link, its recommendations and its concept pages — so a run that
+was already built is not built a second time to get the link back.
 
 Every artifact is a draft. Nothing in this system sends anything to a prospect.
 
@@ -40,7 +46,13 @@ opening, the audit evidence, the service-line coverage table, the website
 mockups, the priced scope, and the checks that could not be run — with what each
 would contain for this prospect beside it. Ticked parts are built and included;
 unticked ones are not built at all, so leaving the mockups out skips the slowest
-step of the build rather than producing pages nobody will see.
+step of the build rather than producing pages nobody will see. Ticked and not
+yet built, the concept pages are built by the proposal builder itself, so the
+document never carries a part list promising pages it does not link.
+
+Rebuilding a run's concept pages keeps their addresses. A proposal stores its
+concept links by value, so reissuing them would turn every concept in a document
+already sent into a dead link.
 
 A part this prospect has nothing to fill stays on the list, greyed, with the
 reason: a missing option reads as a part the tool cannot produce, which is a
@@ -72,7 +84,9 @@ times a counted quantity, then a sum.
   pass, so nothing is omitted.
 - **Crawl diagnostics** — final status, robots.txt fetchability, pages reached
   against pages attempted, and any blocking responses with their server headers.
-- **Concept mockups** in the prospect's own colours, type and logo. The words
+- **Concept mockups** built from whatever the audit could read of the
+  prospect's colours, type and logo — each token that had to fall back to a
+  default is recorded with the mockup. The words
   come from a register chosen from evidence the audit already holds — the Google
   category first, then the site's own structured data and copy — because a
   supplier shown a page about practitioners and appointments reads as a template
@@ -204,6 +218,18 @@ npm run db:migrate   # apply migrations to the local database
 The hosted runtime applies the migrations packaged into `dist/.openai/drizzle`
 on deploy. `npm run db:migrate` applies the same files locally and is safe to
 re-run.
+
+## Before you deploy
+
+```bash
+npm run preflight -- --full
+```
+
+One answer to "is this ready": the four sign-in secrets, the two audit keys and
+what degrades without each, whether either config file is still a placeholder,
+and the typecheck, build, test and lint gates. It exits non-zero on anything
+that would stop a proposal being exportable, and says so separately from a
+warning, which only narrows what a run covers.
 
 ## Deploying
 

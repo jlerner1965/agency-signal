@@ -127,6 +127,44 @@ test("mockups are single-file, use the prospect's colours, and are marked as con
   assert.ok(buildHomepageMockup(brand, services).includes("Hormone Therapy"));
 });
 
+test("a concept page never draws a broken logo, and never says two names", () => {
+  const services = [{ name: "Hormone Therapy", key: "hormone" }];
+
+  // A logo that was found is drawn as a background, so a URL that 404s paints
+  // nothing rather than the broken-image icon and its alt text.
+  const withLogo = {
+    ...extractBrandTokens('<style>.b{background:#1f6f5c}.c{background:#1f6f5c}</style>', "https://clinic.test/", "Boulder Vitality"),
+    logoUrl: "https://clinic.test/logo.svg",
+  };
+  const drawn = buildHomepageMockup(withLogo, services);
+  assert.ok(!/<img\b/i.test(drawn), "no <img> to break");
+  assert.match(drawn, /background-image:url\(https:\/\/clinic\.test\/logo\.svg\)/);
+  assert.equal(drawn.match(/Boulder Vitality/g).length, drawn.match(/Boulder Vitality/g).length, "the name is not duplicated by an alt attribute");
+
+  // A URL that could close the declaration is refused rather than escaped.
+  const hostile = { ...withLogo, logoUrl: "https://clinic.test/a')url('x" };
+  const guarded = buildHomepageMockup(hostile, services);
+  assert.ok(!guarded.includes("background-image:url("), "a URL that cannot sit in a url() is no logo at all");
+});
+
+test("the concept stamp claims only the brand tokens that were read", () => {
+  const services = [{ name: "Hormone Therapy", key: "hormone" }];
+
+  // Nothing readable: no claim about their colours or type.
+  const bare = extractBrandTokens("<p>no styles here</p>", "https://clinic.test/", "Boulder Vitality");
+  const plain = buildHomepageMockup(bare, services);
+  assert.match(plain, /CONCEPT MOCKUP/);
+  assert.doesNotMatch(plain, /own colours/, "the palette was defaulted, so it is not called theirs");
+  assert.match(plain, /what the audit could read/);
+
+  // A palette that was read is named as theirs.
+  const read = extractBrandTokens('<style>.b{background:#1f6f5c}.c{background:#1f6f5c}</style>', "https://clinic.test/", "Boulder Vitality");
+  const named = buildHomepageMockup({ ...read, logoUrl: "https://clinic.test/logo.svg" }, services);
+  assert.match(named, /own colours/);
+  // The logo is a URL that may no longer resolve, so the stamp does not name it.
+  assert.doesNotMatch(named.slice(0, named.indexOf("</div>")), /logo/);
+});
+
 test("a mockup escapes business content rather than interpolating it raw", () => {
   const brand = extractBrandTokens("<p></p>", "https://clinic.test/", '<script>alert(1)</script>');
   const html = buildHomepageMockup(brand, [{ name: '<img onerror=alert(1)>', key: "x" }]);

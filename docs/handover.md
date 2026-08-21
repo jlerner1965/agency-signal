@@ -133,6 +133,17 @@ together:
   concepts are not wanted, and a proposal built without them carries no mockup
   links and no opening sentence offering to show one — the voice rules forbid
   referring to a visual the reader cannot reach.
+- **Ticked is built, whoever asks.** The panel builds the concepts before it
+  requests the proposal, but that ordering lived only in the browser, so a
+  proposal requested any other way stored a part list promising concept pages
+  and no links. `buildRunProposal` builds them when they are wanted and absent,
+  as the lead-based builder always has, and drops the part from the stored
+  choice when it still cannot — a stored choice that names a part the page does
+  not render is a promise the document breaks.
+- **A rebuild keeps the addresses.** `buildRunMockups` updates each `(runId,
+  kind)` row in place rather than deleting and reissuing. A proposal stores its
+  concept links by value, so reissuing turned every concept frame in an
+  already-sent document into "This mockup link is not valid."
 - **An empty column means "everything".** Proposals built before the picker
   existed carry no stored choice, and the document renders every part it has.
   An empty array is a deliberate choice of none of the optional parts, and is
@@ -217,13 +228,14 @@ rendering. `display_mode` controls presentation only — the shipped file asks f
   it backs the manual competitor comparison. `audits` and `audit_findings` were
   dropped by migration `0021`: the engine had replaced every reader, and what
   they still held was scored under a different rubric.
-- **Lint warnings are pre-existing**, in `dashboard.tsx` and
-  `prospect-detail.tsx` — React effect patterns in the two largest client
-  components. Fixing them means restructuring data fetching in both.
-- **`tsc --noEmit` is not clean and is not in CI.** `npm run build` does not
-  typecheck, so a shape mismatch between a stored payload and its reader fails
-  at runtime rather than at the gate. That is the class of bug the run-summary
-  and brand-source seams were given tests for.
+- **Three lint warnings are pre-existing**, all in `prospect-detail.tsx` — one
+  effect dependency list and two `<img>` elements. Fixing the first means
+  restructuring how that component seeds its proposal draft. There are no lint
+  errors; one is a regression.
+- **Concept pages are not printable assets.** They are live pages, embedded in
+  the proposal in a frame. Print / Save PDF renders them, but a frame is the
+  part of a page a PDF is least reliable about, so the concept's own address is
+  printed as text beneath each one. Send the link when you can.
 
 ## What this system deliberately does not do
 

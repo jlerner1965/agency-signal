@@ -18,7 +18,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // can fill; an empty array is a deliberate choice of none of the optional
     // ones, and is kept as one.
     const sections = Array.isArray(body.sections) ? body.sections.map(String) : null;
-    const proposal = await buildRunProposal(runId, findingIds, sections);
+    const { proposal, conceptsBlocked } = await buildRunProposal(runId, findingIds, sections);
     const config = pricing();
     const voice = await voiceSample();
     const built = readSections(proposal.sections);
@@ -37,6 +37,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         // An audit that found nothing specific enough to open with is a signal
         // not to send, so it blocks export the same way a placeholder does.
         proposal.openingBlocked || "",
+        // Concept pages were asked for and could not be built. Said here rather
+        // than left for the operator to notice by reading the document.
+        conceptsBlocked || "",
       ].filter(Boolean),
       openingSource: proposal.openingSource,
     }, { status: 201 });

@@ -45,7 +45,10 @@ export async function POST(request: Request) {
         agencyName,
         website: normalizedWebsite,
         city,
-        state: String(body.state ?? "CO").trim() || "CO",
+        // Empty when it was not given, the same as the CSV import. Defaulting
+        // to a state put "Minneapolis, CO" on a Minnesota prospect and printed
+        // it back to them on the proposal.
+        state: String(body.state ?? "").trim().slice(0, 3),
         contactName: String(body.contactName ?? "").trim(),
         carrier: String(body.carrier ?? "Uncategorized").trim() || "Uncategorized",
         email: String(body.email ?? "").trim(),

@@ -6,6 +6,7 @@ import { buildGooglePresenceAudit } from "@/lib/google-presence";
 import { serviceLinesFor } from "@/lib/audit/deliverables";
 import { carries, readSections } from "@/lib/audit/proposal-sections";
 import { summaryFromRun } from "@/lib/audit/run-summary";
+import { scopedChecks } from "@/lib/audit/scoring-config";
 
 /** Stored JSON columns are parsed once here so no reader has to guess a shape. */
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
@@ -29,6 +30,13 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
       .where(and(eq(auditRuns.leadId, lead.id), isNotNull(auditRuns.finishedAt)))
       .orderBy(desc(auditRuns.id)).limit(1);
     const googleAudit = buildGooglePresenceAudit(lead);
+    // A profile is only reported on once someone has actually reviewed it.
+    // `reviewed` flips true as soon as any one of four lead fields is set, after
+    // which every unset field scores 0 — so a prospect with nothing but a
+    // profile URL on file was shown a headline "0 · Google presence" and cards
+    // stating their completeness was 0% and they had 0 photos. None of it was
+    // measured.
+    const googleReviewed = Boolean(lead.googleReviewedAt);
     const competitors = await db.select({ id: competitorAudits.id, name: competitorAudits.name, score: competitorAudits.score }).from(competitorAudits).where(eq(competitorAudits.leadId, lead.id)).orderBy(desc(competitorAudits.score)).limit(3);
 
     // A proposal built from an audit run cites that run's findings. Reading the
@@ -44,8 +52,13 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
       ? await db.select().from(auditRunModules).where(eq(auditRunModules.runId, run.id)).orderBy(auditRunModules.sortOrder)
       : [];
     const runSummary = summaryFromRun(run ?? null, runModules, null);
-    const unmeasured = runModules
-      .flatMap((module) => parseJson<Array<Record<string, unknown>>>(module.checkSummary, []))
+    // Only checks that were in this run's rubric. A check marked not-applicable
+    // was never a measurement this run failed — its evidence is a note to the
+    // operator ("The Places API does not expose recent posts for a profile we
+    // do not own. Days since the most recent Google post to include it."), and
+    // the prospect was reading four of them as findings about their business.
+    const unmeasured = (scopedChecks(runModules
+      .flatMap((module) => parseJson<Array<Record<string, unknown>>>(module.checkSummary, []))) as Array<Record<string, unknown>>)
       .filter((check) => check.status === "unverified")
       .map((check) => ({ label: String(check.label ?? ""), category: String(check.category ?? ""), evidence: String(check.evidence ?? "") }));
 
@@ -61,7 +74,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     // document making a smaller claim.
     const findings = proposal.runId
       ? runFindings
-      : [...runFindings.slice(0, 2), ...googleAudit.findings.slice(0, 2)].slice(0, 4);
+      : [...runFindings.slice(0, 2), ...(googleReviewed ? googleAudit.findings.slice(0, 2) : [])].slice(0, 4);
     await db.batch([
       db.update(proposals).set({ viewCount: sql`${proposals.viewCount} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(proposals.id, proposal.id)),
       db.update(leads).set({ status: proposal.status === "Accepted" ? "Won" : "Decision pending", updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(leads.id, lead.id)),
@@ -83,10 +96,14 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
         expiresAt: proposal.expiresAt,
         acceptedAt: proposal.acceptedAt,
         openingProse: proposal.openingProse,
-        openingBlocked: proposal.openingBlocked,
         minimumApplied: proposal.minimumApplied,
+        // Whether the amounts are provisional is the reader's business. Why an
+        // opening was not written is not: `openingBlocked` and `voicePlaceholder`
+        // name a repo file and carry this tool's own verdict that the audit was
+        // "a signal not to send", and both were being printed at the top of the
+        // document addressed to the prospect. The operator gets them from the
+        // build response, which is where they belong.
         pricingPlaceholder: proposal.pricingPlaceholder,
-        voicePlaceholder: proposal.voicePlaceholder,
         deliverables: parseJson<string[]>(proposal.deliverables, []),
         scopeItems: parseJson<unknown[]>(proposal.scopeItems, []),
         mockupLinks: parseJson<unknown[]>(proposal.mockupLinks, []),
@@ -116,7 +133,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
         checksFailed: runSummary.checksFailed,
         createdAt: runSummary.createdAt,
       } : null,
-      googleAudit: googleAudit.reviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,
+      googleAudit: googleReviewed ? { score: googleAudit.score, reviewedAt: lead.googleReviewedAt } : null,
       competitors,
       findings,
       // Null for a proposal that predates the engine, which the view treats as
