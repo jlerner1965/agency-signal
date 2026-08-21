@@ -2,7 +2,7 @@ import { desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditRunModules, auditRuns, findings as findingsTable, leads, mockups, proposals, rawPayloads, recommendations } from "@/db/schema";
 import { assertEvidence, buildRecommendations, groundRationale } from "@/lib/audit/recommendations";
-import { buildVoicePrompt, composeOpening, hasSendableHook, planFromFindings, selectOpeningFindings, validateVoice } from "@/lib/audit/proposal-voice";
+import { buildVoicePrompt, composeOpening, hasSendableHook, planFromFindings, selectOpeningFindings, translateTerms, validateVoice } from "@/lib/audit/proposal-voice";
 import { brandSourceFromCrawl, extractBrandTokens } from "@/lib/audit/brand";
 import { buildHomepageMockup, buildServicePageMockup, readMockupContent } from "@/lib/audit/mockup";
 import { detectRegister } from "@/lib/audit/register";
@@ -431,16 +431,27 @@ export async function buildRunProposal(runId: number, findingIds?: number[] | nu
 
   const scopeItems = scopeItemsFrom(priced, config);
 
+  // Terms are translated at the point of use, the same as everywhere else the
+  // reader is spoken to. Falls back to the line's own rationale, then to the
+  // band criteria, so the field is never empty.
+  const leadFinding = selectOpeningFindings(chosen)[0];
+  const outcome = translateTerms(String(leadFinding?.impactNote ?? "").trim())
+    || priced.lines[0].rationale
+    || priced.lines[0].criteria;
+
   const [proposal] = await db.insert(proposals).values({
     leadId: run.leadId, runId, version, token: makeToken(),
     offerId: priced.lines[0].id, title: priced.lines[0].label,
     service: priced.lines.map((line) => line.label).join(", "),
-    // What the first line is for, in the words the audit justified it with. The
-    // band criteria used to stand here — so the sentence under the title, the
-    // one the reader takes as the promise of the engagement, was an internal
-    // pricing rule: "11-20 pages, or structural rework plus rebuild". The
-    // criteria still print where they are honest, under the priced line itself.
-    outcome: priced.lines[0].rationale || priced.lines[0].criteria,
+    // The sentence under the title, which the reader takes as what this is for.
+    //
+    // It used to be the pricing band's own selection rule — "11-20 pages, or
+    // structural rework plus rebuild" — presented as the promise of the
+    // engagement. It is now the consequence the strongest finding names, chosen
+    // by the same gate the opening uses, so a "could not be read" finding never
+    // stands here and the sentence is one the owner can feel. The band criteria
+    // still print where they are honest, under the priced line itself.
+    outcome,
     // One rationale per line, so the document can lay them out as separate
     // paragraphs. Joined with a space they arrived as a single line, which is
     // the one shape ScopeProse cannot break up — every run-built proposal

@@ -165,6 +165,7 @@ would fail on the runtime.
 
 ```bash
 npm run install:ci        # locked, integrity-checked install
+npm run typecheck         # tsc --noEmit; also gated in CI
 npm run build             # bounded vinext build, then validate-artifact.sh
 npm test                  # the build plus the full suite
 npm run lint
@@ -173,9 +174,10 @@ npm run lint
 | Command | What a pass looks like |
 | --- | --- |
 | `install:ci` | `npm ci passed and vinext is available` |
+| `typecheck` | no output |
 | `build` | `Validated Sites artifact: ESM Worker default.fetch and hosting manifest are present.` |
 | `test` | `# fail 0` |
-| `lint` | **4 errors expected.** React effect patterns in `dashboard.tsx` and `prospect-detail.tsx`, recorded in the handover. Lint is not part of the build gate. Any error outside those two files is new and worth reading. |
+| `lint` | **0 errors.** Three warnings are expected, all in `prospect-detail.tsx` — one effect dependency list and two `<img>` elements — and are recorded in the handover. Any error at all is new. |
 
 A green `build` leaves a complete artifact:
 

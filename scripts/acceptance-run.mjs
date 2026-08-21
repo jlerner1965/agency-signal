@@ -178,10 +178,12 @@ async function auditProspect(prospect) {
   const recs = await api(`/api/audit-runs/${runId}/recommendations`, { method: "POST" });
   if (!recs.ok) fail(`Recommendations failed: ${recs.payload.error}`);
 
-  // Mockups before the proposal: the proposal links them, and a rebuild
-  // replaces their tokens.
+  // Mockups before the proposal, the same order the panel builds them in. The
+  // proposal builder will build them itself if this step was skipped, so a
+  // failure here is reported rather than fatal: it means the site could not be
+  // read well enough for a concept, which the concepts check below states.
   const mockups = await api(`/api/audit-runs/${runId}/mockups`, { method: "POST" });
-  if (!mockups.ok) fail(`Mockups failed: ${mockups.payload.error}`);
+  if (!mockups.ok) fail(`Concept pages failed: ${mockups.payload.error}`);
 
   const proposalCall = await api(`/api/audit-runs/${runId}/proposal`, { method: "POST", body: "{}" });
   if (!proposalCall.ok) throw new Error(`Proposal failed: ${proposalCall.payload.error ?? proposalCall.status}`);
@@ -196,7 +198,15 @@ async function auditProspect(prospect) {
   else pass(`${(recs.payload.recommendations ?? []).length} recommendation(s), each citing findings`);
 
   // 5. An opening in the voice, or a stated reason there is none.
+  //
+  // Three outcomes, not two. A document that was never asked for an opening
+  // records `not-included` and is not blocked — and reporting that as "Opening
+  // written" told the operator the proposal had an opening it does not have.
+  // For this run, which asks for everything the run can fill, not-included
+  // means the voice gate refused it.
+  const carriesOpening = (proposalCall.payload.sections ?? []).includes("opening");
   if (proposal.openingBlocked) fail(`No opening written — ${proposal.openingBlocked}`);
+  else if (!carriesOpening || !proposal.openingProse) fail("No opening written — the audit surfaced nothing specific enough to open with, which the voice file calls a signal not to send");
   else pass(`Opening written (${proposal.openingSource})`);
 
   // 6. A price traceable to config/pricing.json.
@@ -204,14 +214,22 @@ async function auditProspect(prospect) {
   if (!scopeItems.length) fail("Priced with no scope items");
   else pass(`${proposal.priceDisplay || money(proposal.price)}${proposal.minimumApplied ? " (minimum applied)" : ""}: ${scopeItems.map((item) => `${item.label} ${item.band}×${item.quantity}`).join(", ")}`);
 
-  // 7. The concept pages the opening refers to must be linkable.
+  // 7. The concept pages the opening refers to must be linkable — and must
+  //    still be linkable after a rebuild, because that is what the operator
+  //    does when they move a tick, and the document may already be sent.
   const links = JSON.parse(proposal.mockupLinks || "[]");
   if (!links.length) fail("Proposal links no concept pages");
   else {
     const checked = await Promise.all(links.map(async (link) => (await fetch(`${base}${link.url}`)).status));
     const broken = checked.filter((status) => status !== 200).length;
     if (broken) fail(`${broken} of ${links.length} concept page link(s) do not resolve`);
-    else pass(`${links.length} concept page(s), all resolving`);
+    else {
+      const again = await api(`/api/audit-runs/${runId}/mockups`, { method: "POST" });
+      const after = (again.payload.mockups ?? []).map((mockup) => mockup.url).sort().join(" ");
+      if (!again.ok) fail(`Concept pages could not be rebuilt: ${again.payload.error}`);
+      else if (after !== links.map((link) => link.url).sort().join(" ")) fail("A rebuild reissued the concept links, so the sent document now points at nothing");
+      else pass(`${links.length} concept page(s), all resolving and stable across a rebuild`);
+    }
   }
 
   if (proposalCall.payload.blockers?.length) fail(`Export blocked: ${proposalCall.payload.blockers.join("; ")}`);
