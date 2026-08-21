@@ -230,7 +230,15 @@ async function priceFromFindings(runId: number, findingIds?: number[] | null) {
   const crawl = payloads.find((payload) => payload.source === "crawl");
   const sitemap = payloads.find((payload) => payload.source === "sitemap");
   const places = payloads.find((payload) => payload.source === "places");
-  const googleKnown = Boolean(places?.ok && places.payload);
+  // Known by either route. The analyzer has always counted a profile a person
+  // reviewed as known — `analyzeServiceLines` builds the gap table from the
+  // category they typed — but pricing asked only whether the API had answered.
+  // So on a run with no Places key the audit raised Google findings, printed
+  // them in the proposal as evidence, and then priced none of the work they
+  // called for, and offered no retainer.
+  const manualEntry = payloads.find((payload) => payload.source === "manual-entry");
+  const googleReviewed = Boolean((manualEntry?.payload as { reviewed?: boolean } | null)?.reviewed);
+  const googleKnown = Boolean(places?.ok && places.payload) || googleReviewed;
   const serviceLines = await serviceLinesFor(runId);
 
   const selected = selectDeliverables(config, {
