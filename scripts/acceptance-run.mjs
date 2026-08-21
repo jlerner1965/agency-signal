@@ -13,6 +13,8 @@
 // Exits non-zero if any prospect fails an acceptance check, so this can gate
 // a release rather than only inform one.
 
+import { formatBatch, summarizeBatch } from "../lib/acceptance-summary.js";
+
 const TICK_LIMIT = 60;
 const TICK_PAUSE_MS = 5000;
 
@@ -184,52 +186,6 @@ async function auditProspect(prospect) {
   };
 }
 
-/**
- * What the whole batch says about the crawler.
- *
- * The per-prospect checks answer "could I send this one?". This answers the
- * question the handover has carried since the engine shipped and no single run
- * can settle: how often a real small-business site refuses to be read, who
- * refuses, and whether a score comes back at all when it does.
- */
-function reportBatch(results) {
-  const read = results.filter((result) => result.run && result.run.reachable !== false);
-  const blocked = results.filter((result) => result.run && result.run.reachable === false);
-  const partial = read.filter((result) => {
-    const reached = Number(result.diagnostics?.pagesReached ?? 0);
-    const attempted = Number(result.diagnostics?.pagesAttempted ?? 0);
-    return attempted > 0 && reached < attempted;
-  });
-
-  const servers = new Map();
-  for (const result of results) {
-    for (const entry of result.diagnostics?.blockedResponses ?? []) {
-      const label = `HTTP ${entry.status}${entry.server ? ` · ${entry.server}` : ""}${entry.cfRay ? " · Cloudflare" : ""}`;
-      servers.set(label, (servers.get(label) ?? 0) + 1);
-    }
-  }
-
-  const jsNav = read.filter((result) => result.diagnostics?.navigationServerRendered === false);
-  const scored = read.filter((result) => result.run?.overallScore !== null && result.run?.overallScore !== undefined);
-  const confidences = read.map((result) => Number(result.run?.confidence ?? 0)).filter((value) => value > 0);
-  const withCoverage = results.filter((result) => (result.coverageFindings ?? 0) > 0);
-  const names = (list) => list.map((result) => result.prospect.name).join(", ");
-
-  console.log(`\n${"=".repeat(72)}\nCRAWL EVIDENCE — ${results.length} prospect${results.length === 1 ? "" : "s"}\n${"=".repeat(72)}`);
-  console.log(`  Read                  ${read.length}/${results.length}${partial.length ? ` (${partial.length} partially — ${names(partial)})` : ""}`);
-  console.log(`  Could not be read     ${blocked.length}${blocked.length ? `  — ${names(blocked)}` : ""}`);
-  if (servers.size) {
-    console.log("  Blocking responses:");
-    for (const [label, count] of [...servers].sort((a, b) => b[1] - a[1])) console.log(`    ${String(count).padStart(3)} × ${label}`);
-  }
-  console.log(`  JS-rendered nav       ${jsNav.length}/${read.length}${jsNav.length ? `  — ${names(jsNav)}` : ""}`);
-  console.log(`  Scored                ${scored.length}/${read.length}${scored.length ? `  — ${scored.map((result) => result.run.overallScore).sort((a, b) => a - b).join(", ")}` : ""}`);
-  if (confidences.length) {
-    console.log(`  Confidence            ${Math.min(...confidences)}–${Math.max(...confidences)}%  (the threshold below which a run is not scored is 60)`);
-  }
-  console.log(`  Service coverage      ${withCoverage.length}/${results.length} produced findings`);
-}
-
 const prospects = await loadProspects();
 if (!prospects.length || prospects.some((prospect) => !prospect.name || !prospect.url)) {
   console.error('Give each prospect as "Business name | City | https://url", or pass --file prospects.json.');
@@ -266,7 +222,10 @@ for (const prospect of prospects) {
   }
 }
 
-if (results.length) reportBatch(results);
+if (results.length) {
+  console.log(`\n${"=".repeat(72)}`);
+  for (const line of formatBatch(summarizeBatch(results))) console.log(line);
+}
 
 console.log(`\n${failures ? `${failures} acceptance check(s) failed.` : "All acceptance checks passed."}`);
 process.exit(failures ? 1 : 0);
