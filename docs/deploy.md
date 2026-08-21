@@ -165,6 +165,20 @@ would fail on the runtime.
 
 ```bash
 npm run install:ci        # locked, integrity-checked install
+npm run preflight -- --full
+```
+
+`preflight` is the whole gate in one answer. It reads the secrets the runtime
+will read, checks that neither config file is still a placeholder, and — with
+`--full` — runs typecheck, build, the suite and lint. It exits non-zero on
+anything that would stop a proposal going out, and separates that from a
+warning, which only lowers what a run can cover. Without `--full` it skips the
+four commands and answers in a second, which is what you want against a
+deployed environment.
+
+The four gates individually, if you want them one at a time:
+
+```bash
 npm run typecheck         # tsc --noEmit; also gated in CI
 npm run build             # bounded vinext build, then validate-artifact.sh
 npm test                  # the build plus the full suite

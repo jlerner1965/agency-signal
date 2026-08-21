@@ -219,6 +219,18 @@ The hosted runtime applies the migrations packaged into `dist/.openai/drizzle`
 on deploy. `npm run db:migrate` applies the same files locally and is safe to
 re-run.
 
+## Before you deploy
+
+```bash
+npm run preflight -- --full
+```
+
+One answer to "is this ready": the four sign-in secrets, the two audit keys and
+what degrades without each, whether either config file is still a placeholder,
+and the typecheck, build, test and lint gates. It exits non-zero on anything
+that would stop a proposal being exportable, and says so separately from a
+warning, which only narrows what a run covers.
+
 ## Deploying
 
 `docs/deploy.md` covers it end to end: the preflight gates and what a pass looks
