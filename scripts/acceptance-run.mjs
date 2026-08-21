@@ -100,8 +100,24 @@ async function auditProspect(prospect) {
 
   // 1. Reachability, stated separately from score. An unreadable site must
   //    never read as a bad one.
+  const diagnostics = summary.diagnostics ?? {};
   if (run.reachable === false) fail(`Site could not be read — ${run.error || "no reason recorded"}`);
-  else pass(`Site read: ${summary.diagnostics?.pagesReached ?? "?"}/${summary.diagnostics?.pagesAttempted ?? "?"} pages, robots ${summary.diagnostics?.robotsFetchable ? "fetchable" : "not fetchable"}, ${summary.diagnostics?.pagesDisallowed ?? 0} disallowed`);
+  else pass(`Site read: ${diagnostics.pagesReached ?? "?"}/${diagnostics.pagesAttempted ?? "?"} pages, robots ${diagnostics.robotsFetchable ? "fetchable" : "not fetchable"}, ${diagnostics.pagesDisallowed ?? 0} disallowed`);
+
+  // What blocked us, and how. This is the evidence the blocking-rate question
+  // needs and a pass/fail line cannot carry: which server answered, with what
+  // status, and whether the navigation was even in the served HTML.
+  for (const blocked of diagnostics.blockedResponses ?? []) {
+    let path = blocked.url;
+    try { path = new URL(blocked.url).pathname; } catch { /* print it as stored */ }
+    notes.push({ ok: true, quiet: true, message: `Blocked: HTTP ${blocked.status} on ${path}${blocked.server ? ` · server ${blocked.server}` : ""}${blocked.cfRay ? " · Cloudflare" : ""}` });
+  }
+  if (diagnostics.navigationServerRendered === false) {
+    notes.push({ ok: true, quiet: true, message: "Navigation is JS-rendered, not in the served HTML" });
+  }
+  if (diagnostics.truncatedBy) {
+    notes.push({ ok: true, quiet: true, message: `Crawl truncated by ${diagnostics.truncatedBy}` });
+  }
 
   // 2. A score, or an honest refusal to give one.
   if (run.overallScore === null) fail(`No score reported (${run.confidence}% of rubric verified, ${run.checksVerified}/${run.checksTotal} in-scope checks) — ${run.error}`);
@@ -160,11 +176,58 @@ async function auditProspect(prospect) {
   if (proposalCall.payload.blockers?.length) fail(`Export blocked: ${proposalCall.payload.blockers.join("; ")}`);
 
   return {
-    prospect, runId, ticks, notes,
+    prospect, runId, ticks, notes, run, diagnostics,
+    coverageFindings: coverageFindings.length,
     report: `${base}/report/${lead.reportToken}`,
     proposal: `${base}/proposal/${proposal.token}`,
     mockups: links.map((link) => `${base}${link.url}`),
   };
+}
+
+/**
+ * What the whole batch says about the crawler.
+ *
+ * The per-prospect checks answer "could I send this one?". This answers the
+ * question the handover has carried since the engine shipped and no single run
+ * can settle: how often a real small-business site refuses to be read, who
+ * refuses, and whether a score comes back at all when it does.
+ */
+function reportBatch(results) {
+  const read = results.filter((result) => result.run && result.run.reachable !== false);
+  const blocked = results.filter((result) => result.run && result.run.reachable === false);
+  const partial = read.filter((result) => {
+    const reached = Number(result.diagnostics?.pagesReached ?? 0);
+    const attempted = Number(result.diagnostics?.pagesAttempted ?? 0);
+    return attempted > 0 && reached < attempted;
+  });
+
+  const servers = new Map();
+  for (const result of results) {
+    for (const entry of result.diagnostics?.blockedResponses ?? []) {
+      const label = `HTTP ${entry.status}${entry.server ? ` · ${entry.server}` : ""}${entry.cfRay ? " · Cloudflare" : ""}`;
+      servers.set(label, (servers.get(label) ?? 0) + 1);
+    }
+  }
+
+  const jsNav = read.filter((result) => result.diagnostics?.navigationServerRendered === false);
+  const scored = read.filter((result) => result.run?.overallScore !== null && result.run?.overallScore !== undefined);
+  const confidences = read.map((result) => Number(result.run?.confidence ?? 0)).filter((value) => value > 0);
+  const withCoverage = results.filter((result) => (result.coverageFindings ?? 0) > 0);
+  const names = (list) => list.map((result) => result.prospect.name).join(", ");
+
+  console.log(`\n${"=".repeat(72)}\nCRAWL EVIDENCE — ${results.length} prospect${results.length === 1 ? "" : "s"}\n${"=".repeat(72)}`);
+  console.log(`  Read                  ${read.length}/${results.length}${partial.length ? ` (${partial.length} partially — ${names(partial)})` : ""}`);
+  console.log(`  Could not be read     ${blocked.length}${blocked.length ? `  — ${names(blocked)}` : ""}`);
+  if (servers.size) {
+    console.log("  Blocking responses:");
+    for (const [label, count] of [...servers].sort((a, b) => b[1] - a[1])) console.log(`    ${String(count).padStart(3)} × ${label}`);
+  }
+  console.log(`  JS-rendered nav       ${jsNav.length}/${read.length}${jsNav.length ? `  — ${names(jsNav)}` : ""}`);
+  console.log(`  Scored                ${scored.length}/${read.length}${scored.length ? `  — ${scored.map((result) => result.run.overallScore).sort((a, b) => a - b).join(", ")}` : ""}`);
+  if (confidences.length) {
+    console.log(`  Confidence            ${Math.min(...confidences)}–${Math.max(...confidences)}%  (the threshold below which a run is not scored is 60)`);
+  }
+  console.log(`  Service coverage      ${withCoverage.length}/${results.length} produced findings`);
 }
 
 const prospects = await loadProspects();
@@ -181,12 +244,16 @@ if (!login.ok) {
 }
 
 let failures = 0;
+const results = [];
 for (const prospect of prospects) {
   console.log(`\n${"=".repeat(72)}\n${prospect.name} — ${prospect.url}\n${"=".repeat(72)}`);
   try {
     const result = await auditProspect(prospect);
+    results.push(result);
     for (const note of result.notes) {
-      console.log(`  ${note.ok ? "PASS" : "FAIL"}  ${note.message}`);
+      // Quiet notes are evidence, not verdicts: what blocked the crawl is
+      // worth printing and is not a failure of this prospect's audit.
+      console.log(`  ${note.quiet ? "····" : note.ok ? "PASS" : "FAIL"}  ${note.message}`);
       if (!note.ok) failures += 1;
     }
     console.log(`\n  run ${result.runId} in ${result.ticks} ticks`);
@@ -198,6 +265,8 @@ for (const prospect of prospects) {
     console.log(`  FAIL  ${error instanceof Error ? error.message : error}`);
   }
 }
+
+if (results.length) reportBatch(results);
 
 console.log(`\n${failures ? `${failures} acceptance check(s) failed.` : "All acceptance checks passed."}`);
 process.exit(failures ? 1 : 0);
