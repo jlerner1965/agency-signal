@@ -33,8 +33,47 @@ function readFlags(argv) {
 
 const { flags, rest } = readFlags(process.argv.slice(2));
 const base = (flags.base || "http://localhost:5173").replace(/\/$/, "");
-const email = flags.email || process.env.AGENCYSIGNAL_LOGIN_EMAIL || "";
-const password = flags.password || process.env.AGENCYSIGNAL_LOGIN_PASSWORD || "";
+
+/**
+ * The sign-in, without needing it on the command line.
+ *
+ * A long invocation carrying a quoted password is exactly the thing a terminal
+ * mangles on paste, and one unclosed quote swallows everything typed after it.
+ * The email is already on the machine that deployed this, in `.dev.vars`, and
+ * the password can be typed rather than pasted — so neither has to be in the
+ * command, or in shell history.
+ */
+async function readDevVar(key) {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const file = await readFile(new URL("../.dev.vars", import.meta.url), "utf8");
+    const line = file.split("\n").find((entry) => entry.startsWith(`${key}=`));
+    return line ? line.slice(key.length + 1).trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Typed, not echoed. Mirrors the prompt in scripts/setup-credentials.mjs. */
+async function promptSecret(question) {
+  const { createInterface } = await import("node:readline/promises");
+  const { stdin, stdout } = await import("node:process");
+  if (!stdin.isTTY) return "";
+  const rl = createInterface({ input: stdin, output: stdout, terminal: true });
+  const original = stdout.write.bind(stdout);
+  stdout.write(question);
+  rl.output.write = (chunk, encoding, callback) => { if (callback) callback(); };
+  const answer = await rl.question("");
+  rl.output.write = original;
+  stdout.write("\n");
+  rl.close();
+  return answer;
+}
+
+const email = flags.email || process.env.AGENCYSIGNAL_LOGIN_EMAIL || (await readDevVar("AGENCYSIGNAL_LOGIN_EMAIL"));
+const password = flags.password
+  || process.env.AGENCYSIGNAL_LOGIN_PASSWORD
+  || (email ? await promptSecret(`Password for ${email}: `) : "");
 
 async function loadProspects() {
   if (flags.file) {
