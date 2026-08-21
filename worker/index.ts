@@ -3,8 +3,13 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 
 interface Env {
-  ASSETS: Fetcher;
-  DB: D1Database;
+  // Typed to the contract this file actually has, which is with vinext's
+  // handler and its `WorkerAssetEnv` — the DOM's Request and Response, not the
+  // Workers runtime's. Naming Cloudflare's `Fetcher` here instead made every
+  // call in this file a cross-realm mismatch against types it never touches.
+  ASSETS: { fetch(request: Request): Promise<Response> };
+  // Never read here; declared because it is part of the Worker's environment.
+  DB: import("@cloudflare/workers-types").D1Database;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {

@@ -113,8 +113,13 @@ export async function PATCH(
       await db.insert(activities).values({ leadId: id, activityType: "contact_updated", description: "Contact details updated" });
     }
     if (body.nextFollowUpAt !== undefined) {
-      const description = body.nextFollowUpAt
-        ? `Follow-up scheduled for ${new Date(body.nextFollowUpAt).toLocaleString("en-US")}`
+      // The body is unknown JSON: a caller can send anything under this key,
+      // and `new Date(anything)` is only meaningful for a string or a number.
+      const scheduledFor = typeof body.nextFollowUpAt === "string" || typeof body.nextFollowUpAt === "number"
+        ? new Date(body.nextFollowUpAt)
+        : null;
+      const description = scheduledFor && !Number.isNaN(scheduledFor.getTime())
+        ? `Follow-up scheduled for ${scheduledFor.toLocaleString("en-US")}`
         : "Follow-up date cleared";
       await db.insert(activities).values({ leadId: id, activityType: "followup_scheduled", description });
     }

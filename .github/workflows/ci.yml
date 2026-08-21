@@ -40,8 +40,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Also typechecks and validates the Worker artifact, via
-      # scripts/build-verified.sh.
+      # `npm run build` does not typecheck, so without this a shape mismatch
+      # between a stored payload and its reader fails at runtime instead of
+      # here. That is exactly how the crawl payload and the dashboard's audit
+      # tables both went wrong.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Validates the Worker artifact too, via scripts/build-verified.sh.
       - name: Build
         run: npm run build
 
