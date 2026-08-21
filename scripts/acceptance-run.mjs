@@ -13,6 +13,8 @@
 // Exits non-zero if any prospect fails an acceptance check, so this can gate
 // a release rather than only inform one.
 
+import { formatBatch, summarizeBatch } from "../lib/acceptance-summary.js";
+
 const TICK_LIMIT = 60;
 const TICK_PAUSE_MS = 5000;
 
@@ -100,8 +102,24 @@ async function auditProspect(prospect) {
 
   // 1. Reachability, stated separately from score. An unreadable site must
   //    never read as a bad one.
+  const diagnostics = summary.diagnostics ?? {};
   if (run.reachable === false) fail(`Site could not be read — ${run.error || "no reason recorded"}`);
-  else pass(`Site read: ${summary.diagnostics?.pagesReached ?? "?"}/${summary.diagnostics?.pagesAttempted ?? "?"} pages, robots ${summary.diagnostics?.robotsFetchable ? "fetchable" : "not fetchable"}, ${summary.diagnostics?.pagesDisallowed ?? 0} disallowed`);
+  else pass(`Site read: ${diagnostics.pagesReached ?? "?"}/${diagnostics.pagesAttempted ?? "?"} pages, robots ${diagnostics.robotsFetchable ? "fetchable" : "not fetchable"}, ${diagnostics.pagesDisallowed ?? 0} disallowed`);
+
+  // What blocked us, and how. This is the evidence the blocking-rate question
+  // needs and a pass/fail line cannot carry: which server answered, with what
+  // status, and whether the navigation was even in the served HTML.
+  for (const blocked of diagnostics.blockedResponses ?? []) {
+    let path = blocked.url;
+    try { path = new URL(blocked.url).pathname; } catch { /* print it as stored */ }
+    notes.push({ ok: true, quiet: true, message: `Blocked: HTTP ${blocked.status} on ${path}${blocked.server ? ` · server ${blocked.server}` : ""}${blocked.cfRay ? " · Cloudflare" : ""}` });
+  }
+  if (diagnostics.navigationServerRendered === false) {
+    notes.push({ ok: true, quiet: true, message: "Navigation is JS-rendered, not in the served HTML" });
+  }
+  if (diagnostics.truncatedBy) {
+    notes.push({ ok: true, quiet: true, message: `Crawl truncated by ${diagnostics.truncatedBy}` });
+  }
 
   // 2. A score, or an honest refusal to give one.
   if (run.overallScore === null) fail(`No score reported (${run.confidence}% of rubric verified, ${run.checksVerified}/${run.checksTotal} in-scope checks) — ${run.error}`);
@@ -160,7 +178,8 @@ async function auditProspect(prospect) {
   if (proposalCall.payload.blockers?.length) fail(`Export blocked: ${proposalCall.payload.blockers.join("; ")}`);
 
   return {
-    prospect, runId, ticks, notes,
+    prospect, runId, ticks, notes, run, diagnostics,
+    coverageFindings: coverageFindings.length,
     report: `${base}/report/${lead.reportToken}`,
     proposal: `${base}/proposal/${proposal.token}`,
     mockups: links.map((link) => `${base}${link.url}`),
@@ -181,12 +200,16 @@ if (!login.ok) {
 }
 
 let failures = 0;
+const results = [];
 for (const prospect of prospects) {
   console.log(`\n${"=".repeat(72)}\n${prospect.name} — ${prospect.url}\n${"=".repeat(72)}`);
   try {
     const result = await auditProspect(prospect);
+    results.push(result);
     for (const note of result.notes) {
-      console.log(`  ${note.ok ? "PASS" : "FAIL"}  ${note.message}`);
+      // Quiet notes are evidence, not verdicts: what blocked the crawl is
+      // worth printing and is not a failure of this prospect's audit.
+      console.log(`  ${note.quiet ? "····" : note.ok ? "PASS" : "FAIL"}  ${note.message}`);
       if (!note.ok) failures += 1;
     }
     console.log(`\n  run ${result.runId} in ${result.ticks} ticks`);
@@ -197,6 +220,11 @@ for (const prospect of prospects) {
     failures += 1;
     console.log(`  FAIL  ${error instanceof Error ? error.message : error}`);
   }
+}
+
+if (results.length) {
+  console.log(`\n${"=".repeat(72)}`);
+  for (const line of formatBatch(summarizeBatch(results))) console.log(line);
 }
 
 console.log(`\n${failures ? `${failures} acceptance check(s) failed.` : "All acceptance checks passed."}`);
