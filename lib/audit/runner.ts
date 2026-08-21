@@ -486,7 +486,7 @@ async function finalizeRun(runId: number) {
   // listed and still say why, but counting them in the denominator would
   // report a fraction the percentage is not derived from.
   const scoped = scopedChecks(checks);
-  const checksVerified = scoped.filter((check) => check.status !== "unverified").length;
+  const checksVerified = scoped.filter((check: { status?: string }) => check.status !== "unverified").length;
   const underMeasured = weighted !== null && confidence < minimumConfidence;
   const overall = underMeasured ? null : weighted;
 

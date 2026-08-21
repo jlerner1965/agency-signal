@@ -1,6 +1,6 @@
-import { desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activities, auditFindings, audits, leads, reportEvents } from "@/db/schema";
+import { activities, leads, reportEvents } from "@/db/schema";
 
 const demoBusinesses = [
   "Front Range Insurance Group",
@@ -16,10 +16,6 @@ export async function prepareLeadData() {
   const demoRows = await db.select({ id: leads.id }).from(leads).where(inArray(leads.agencyName, demoBusinesses));
   const demoIds = demoRows.map((row) => row.id);
   if (demoIds.length) {
-    const demoAudits = await db.select({ id: audits.id }).from(audits).where(inArray(audits.leadId, demoIds));
-    const demoAuditIds = demoAudits.map((row) => row.id);
-    if (demoAuditIds.length) await db.delete(auditFindings).where(inArray(auditFindings.auditId, demoAuditIds));
-    await db.delete(audits).where(inArray(audits.leadId, demoIds));
     await db.delete(reportEvents).where(inArray(reportEvents.leadId, demoIds));
     await db.delete(activities).where(inArray(activities.leadId, demoIds));
     await db.delete(leads).where(inArray(leads.id, demoIds));
@@ -32,6 +28,11 @@ export async function prepareLeadData() {
     .where(lt(sql`length(${leads.reportToken})`, 32));
 }
 
+/**
+ * The prospect a report token names. It used to return a legacy audit and its
+ * findings alongside — the tables that no longer have a writer — and the report
+ * that consumed them now reads the engine run instead.
+ */
 export async function getLeadByToken(token: string) {
   await prepareLeadData();
   const db = await getDb();
@@ -40,20 +41,5 @@ export async function getLeadByToken(token: string) {
     .from(leads)
     .where(eq(leads.reportToken, token))
     .limit(1);
-  if (!lead) return null;
-
-  const [audit] = await db
-    .select()
-    .from(audits)
-    .where(eq(audits.leadId, lead.id))
-    .orderBy(desc(audits.createdAt), desc(audits.id))
-    .limit(1);
-  const findings = audit
-    ? await db
-        .select()
-        .from(auditFindings)
-        .where(eq(auditFindings.auditId, audit.id))
-        .orderBy(auditFindings.sortOrder)
-    : [];
-  return { lead, audit, findings };
+  return lead ? { lead } : null;
 }

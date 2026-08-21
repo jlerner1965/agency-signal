@@ -1,8 +1,9 @@
-import { desc, eq, and, sql } from "drizzle-orm";
+import { desc, eq, and, isNotNull, sql } from "drizzle-orm";
 import { requireDashboardApi } from "@/app/dashboard-auth";
 import { getDb } from "@/db";
-import { activities, aiRuns, auditFindings, audits, leads, proposals } from "@/db/schema";
+import { activities, aiRuns, auditRuns, findings as engineFindings, leads, proposals } from "@/db/schema";
 import { buildOpportunity } from "@/lib/opportunity";
+import { findingsFromRun } from "@/lib/audit/run-summary";
 import { buildCopilotEvidence, buildCopilotPrompt, copilotActions, copilotResponseSchema, extractResponseText, groundCopilotResult } from "@/lib/copilot";
 
 const statuses = new Set(["Approved", "Discarded"]);
@@ -24,8 +25,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const db = await getDb();
     const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
     if (!lead) return jsonError(new Error("Lead not found"), "Lead not found", 404);
-    const [audit] = await db.select().from(audits).where(eq(audits.leadId, leadId)).orderBy(desc(audits.createdAt), desc(audits.id)).limit(1);
-    const findings = audit ? await db.select().from(auditFindings).where(eq(auditFindings.auditId, audit.id)).orderBy(auditFindings.sortOrder).limit(8) : [];
+    // The newest finished run, not the legacy `audits` tables this used to
+    // read — those have had no writer since the old scoring path was removed,
+    // so every answer here was grounded in an empty finding set.
+    const [auditRun] = await db.select().from(auditRuns)
+      .where(and(eq(auditRuns.leadId, leadId), isNotNull(auditRuns.finishedAt)))
+      .orderBy(desc(auditRuns.id)).limit(1);
+    const findings = auditRun
+      ? findingsFromRun(await db.select().from(engineFindings)
+        .where(eq(engineFindings.runId, auditRun.id))
+        .orderBy(engineFindings.sortOrder).limit(8))
+      : [];
     const activityRows = await db.select().from(activities).where(eq(activities.leadId, leadId)).orderBy(desc(activities.createdAt), desc(activities.id)).limit(10);
     const [proposal] = await db.select().from(proposals).where(eq(proposals.leadId, leadId)).orderBy(desc(proposals.createdAt), desc(proposals.id)).limit(1);
     const evidence = buildCopilotEvidence({ lead, findings, activities: activityRows, opportunity: buildOpportunity(lead, findings), proposal: proposal ?? null });

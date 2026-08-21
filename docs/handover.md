@@ -95,6 +95,7 @@ Only a genuinely scored run may write the prospect's headline score.
 | Brand token extraction | `lib/audit/brand.js` |
 | Mockup templates | `lib/audit/mockup.js` |
 | Which parts a proposal can carry, and when each is offerable | `lib/audit/proposal-sections.js` |
+| A run in the shape the dashboard reads, and the mockups' brand source | `lib/audit/run-summary.js`, `lib/audit/brand.js` |
 
 Weights are deliberately ordered: **Service coverage 0.30, Trust 0.25**, then
 Conversion 0.20, Visibility 0.15, Technical 0.10. A competent site-builder
@@ -212,13 +213,17 @@ rendering. `display_mode` controls presentation only — the shipped file asks f
   were defaulted.
 - **`leads.score` is a single number for a five-category rubric.** Sub-scores are
   stored per category but the prospect list shows only the overall.
-- **The `audits`, `audit_findings` and `competitor_audits` tables are legacy.**
-  They predate the engine and still back the manual competitor comparison. The
-  legacy `/api/audit` scoring path is gone and its scores were cleared by
-  migration `0014`.
-- **Four lint errors are pre-existing**, in `dashboard.tsx` and
+- **`competitor_audits` is the last legacy table**, and it is still written —
+  it backs the manual competitor comparison. `audits` and `audit_findings` were
+  dropped by migration `0021`: the engine had replaced every reader, and what
+  they still held was scored under a different rubric.
+- **Lint warnings are pre-existing**, in `dashboard.tsx` and
   `prospect-detail.tsx` — React effect patterns in the two largest client
   components. Fixing them means restructuring data fetching in both.
+- **`tsc --noEmit` is not clean and is not in CI.** `npm run build` does not
+  typecheck, so a shape mismatch between a stored payload and its reader fails
+  at runtime rather than at the gate. That is the class of bug the run-summary
+  and brand-source seams were given tests for.
 
 ## What this system deliberately does not do
 

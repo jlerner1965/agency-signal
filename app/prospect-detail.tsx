@@ -30,6 +30,11 @@ const proposalOffers = offerCatalog.filter((offer) => ["digital-presence-plan", 
 function initials(name: string) { return name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
 function tone(score: number) { return score < 55 ? "critical" : score < 75 ? "watch" : "good"; }
 
+/** High first. A severity the map does not carry sorts last rather than
+ *  turning the whole comparison into NaN. */
+const SEVERITY_ORDER: Record<string, number> = { High: 0, Medium: 1, Low: 2 };
+function severityRank(severity: string) { return SEVERITY_ORDER[severity] ?? 3; }
+
 /** The proposal scope suggested by what the audit found. */
 function seededScope(primaryFinding: string | undefined, googleFinding: string | undefined) {
   return [primaryFinding, googleFinding && `Google presence: ${googleFinding}.`].filter(Boolean).join(" ")
@@ -140,7 +145,7 @@ export default function ProspectDetail(props: Props) {
   const combinedFindings = [
     ...findings.map((finding) => ({ ...finding, source: "Website" })),
     ...googleAudit.findings.map((finding) => ({ ...finding, source: "Google" })),
-  ].sort((a, b) => ({ High: 0, Medium: 1, Low: 2 }[a.severity] - { High: 0, Medium: 1, Low: 2 }[b.severity]));
+  ].sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
   const selectedOffer = proposalOffers.find((offer) => offer.id === offerId) ?? suggestedOffer;
 
   function useBlueprintInProposal() {
