@@ -53,6 +53,14 @@ export async function collectGoogle(context: CollectContext, keys: Record<string
     retryable: false,
     payload: {
       reviewed: Boolean(lead.googleReviewedAt),
+      // What the profile itself shows, as a person recorded it. Without these
+      // the analyzer had nothing to measure a hand-read profile against, so
+      // every prospect audited without a Places key reported a profile that
+      // "could not be read" however carefully it had been reviewed.
+      googlePrimaryCategory: lead.googlePrimaryCategory ?? "",
+      googleServices: lead.googleServices ?? "",
+      rating: Number(lead.rating ?? 0),
+      reviewCount: Number(lead.reviewCount ?? 0),
       googlePostRecencyDays: Number(lead.googlePostRecencyDays ?? 0),
       googleResponseRate: Number(lead.googleResponseRate ?? 0),
       googlePhotoCount: Number(lead.googlePhotoCount ?? 0),

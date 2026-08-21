@@ -311,3 +311,37 @@ test("an index's own label is navigation chrome, not a line", () => {
   const names = extractSiteServices(pages, nav).map((service) => service.name);
   assert.deepEqual(names, ["Aragonite for Glass"]);
 });
+
+test("a profile read by a person is a source, not a profile that could not be read", () => {
+  const withoutKey = [
+    { source: "crawl", ok: true, payload: { pages: [{ ok: true, text: "" }] } },
+    { source: "places", ok: false, failureReason: "GOOGLE_PLACES_API_KEY is not configured.", payload: null },
+  ];
+
+  // Nobody looked: nothing is measured, and the audit says so.
+  const unread = analyzeGooglePresence([...withoutKey, { source: "manual-entry", ok: true, payload: { reviewed: false } }]);
+  assert.match(unread.findings[0].title, /could not be assessed/);
+  // The reader of a proposal is not told to configure an environment variable.
+  assert.doesNotMatch(unread.findings[0].recommendation, /API_KEY|GOOGLE_PLACES/);
+  assert.ok(unread.checks.every((check) => check.status === "unverified"));
+
+  // A person looked and recorded what the profile shows. That is measured.
+  const read = analyzeGooglePresence([...withoutKey, {
+    source: "manual-entry", ok: true,
+    payload: {
+      reviewed: true, googlePrimaryCategory: "HVAC contractor", googleNapConsistent: true,
+      rating: 4.6, reviewCount: 8, googlePhotoCount: 40, googleResponseRate: 90,
+      googleProfileCompleteness: 95, googlePostRecencyDays: 7,
+    },
+  }]);
+  assert.ok(!read.findings.some((finding) => /could not be assessed/.test(finding.title)), "the profile was read");
+  assert.equal(read.checks.find((check) => check.id === "gbp-category").status, "passed");
+  assert.equal(read.checks.find((check) => check.id === "gbp-nap").status, "passed");
+  // Eight reviews is thin, and that is a finding rather than an unmeasured check.
+  assert.equal(read.checks.find((check) => check.id === "gbp-reviews").status, "failed");
+  assert.ok(read.findings.some((finding) => /Review volume is thin/.test(finding.title)));
+  // Nobody was asked for opening hours, so it stays unverified rather than passing.
+  assert.equal(read.checks.find((check) => check.id === "gbp-hours").status, "unverified");
+  assert.match(read.message, /manual review/);
+});
+
